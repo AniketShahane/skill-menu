@@ -197,7 +197,7 @@ describe("interactive memory Claude agent helpers", () => {
   });
 
   it("launches the configured WORKING_MEMORY_CLAUDE_BIN override instead of the bare command", async () => {
-    vi.stubEnv("WORKING_MEMORY_CLAUDE_BIN", "/usr/local/share/npm-global/bin/claude");
+    vi.stubEnv("WORKING_MEMORY_CLAUDE_BIN", "/usr/local/bin/claude");
     type SpawnImpl = NonNullable<Parameters<typeof launchClaudeAgent>[1]>;
     let capturedCommand: string | undefined;
     const spawnImpl = ((command: string) => {
@@ -216,7 +216,7 @@ describe("interactive memory Claude agent helpers", () => {
 
     await launchClaudeAgent({ model: "haiku", name: "wm-task", prompt: "Do the task." }, spawnImpl);
 
-    expect(capturedCommand).toBe("/usr/local/share/npm-global/bin/claude");
+    expect(capturedCommand).toBe("/usr/local/bin/claude");
   });
 
   it("surfaces a clear, actionable error when the claude binary cannot be found", async () => {

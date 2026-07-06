@@ -5,12 +5,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SOURCE_APP_DIR="${WORKING_MEMORY_STUDIO_SOURCE_APP_DIR:-$SKILL_DIR/assets/working-memory-viewer}"
 
+if [ -z "${HOME:-}" ]; then
+  echo "HOME is required to run the working-memory Studio." >&2
+  exit 1
+fi
+
 # Workspace-local defaults (WORKING_MEMORY_ENABLE_DIRECT_DEPLOY, WORKING_MEMORY_AGENT_CWD,
 # WORKING_MEMORY_CLAUDE_BIN, ...). Only fills in vars the caller didn't already set, so any
 # explicit override still wins. Without this, restarts triggered by a fingerprint/config
 # mismatch (e.g. a `command -v claude` resolution that differs from a prior invocation) would
 # silently fall back to library defaults and disable direct deploy.
-STUDIO_LOCAL_DEFAULTS="${WORKING_MEMORY_STUDIO_LOCAL_DEFAULTS:-$SCRIPT_DIR/ensure-studio.local.sh}"
+STUDIO_LOCAL_DEFAULTS="${WORKING_MEMORY_STUDIO_LOCAL_DEFAULTS:-${XDG_CONFIG_HOME:-$HOME/.config}/working-memory/ensure-studio.local.sh}"
 if [ -f "$STUDIO_LOCAL_DEFAULTS" ]; then
   # shellcheck disable=SC1090
   source "$STUDIO_LOCAL_DEFAULTS"

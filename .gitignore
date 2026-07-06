@@ -18,3 +18,7 @@ credentials*
 
 # runtime working-memory archive (personal notes must never be committed)
 **/assets/daily-notes/
+
+# machine-local skill config (sourced env files / local JSON; never shared)
+**/*.local.sh
+**/*.local.json

@@ -512,7 +512,7 @@ Update `_index.json` so today's date appears in navigation/history with its late
 
 On first invocation, use manual-only local defaults unless the user has already configured source connectors:
 
-1. Resolve and confirm `archiveDir`; default is `<skill-root>/assets/daily-notes`, resolved relative to wherever this skill directory is installed. Use `INTERACTIVE_MEMORY_DIR` to point at a different/external archive only when the user explicitly asks for one.
+1. Resolve and confirm `archiveDir`; the code default is the XDG data path `$XDG_DATA_HOME/working-memory/Interactive Working Memory` (e.g. `~/.local/share/working-memory/Interactive Working Memory`), resolved by the studio's runtime config. A machine-local override lives in `INTERACTIVE_MEMORY_DIR`, persisted in the XDG config file (`${XDG_CONFIG_HOME:-$HOME/.config}/working-memory/ensure-studio.local.sh`) that `ensure-studio.sh` sources. Point at a different/external archive only when the user explicitly asks for one.
 2. Resolve `timezone` reliably: compare Google Calendar's own `timeZone` field against the terminal/system timezone. If they agree, treat it as resolved and state it plainly. If they disagree, only one is available, or neither is, ask the user directly. Never silently prefer one signal (a background session's terminal clock reflects the execution environment, not necessarily the user). Store the confirmed value in today's `day.json.timezone` for reuse by later steps.
 3. Create `${archiveDir}/` if it does not exist.
 4. Create root `_index.json` if it does not exist.

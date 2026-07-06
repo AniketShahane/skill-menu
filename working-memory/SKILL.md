@@ -31,7 +31,7 @@ Resolve configuration before running any flow:
 
 | Key                      | Required | How to resolve                                                                                                                                       |
 | ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `archiveDir`             | Yes      | Absolute path to the `Interactive Working Memory` JSON archive. Default is `<skill-root>/assets/daily-notes` — a path resolved relative to wherever this skill directory is installed, not a hardcoded absolute path, so the archive travels with the skill install. Set `INTERACTIVE_MEMORY_DIR` to override with a different/external archive location if explicitly wanted. |
+| `archiveDir`             | Yes      | Absolute path to the `Interactive Working Memory` JSON archive. The code default is `$XDG_DATA_HOME/working-memory/Interactive Working Memory` (i.e. `~/.local/share/...` when `XDG_DATA_HOME` is unset) — not a path under this skill's own install directory. A machine-local override lives in the sourced config file at `${XDG_CONFIG_HOME:-$HOME/.config}/working-memory/ensure-studio.local.sh` (see [references/setup-flow.md](references/setup-flow.md)); set `INTERACTIVE_MEMORY_DIR` there, or export it directly, to point at a different/external archive location. |
 | `timezone`               | Yes      | IANA timezone used for day boundaries and wall-clock scheduling. Cross-check Google Calendar's own `timeZone` field against the terminal/system timezone: if they agree, treat as resolved and state it plainly; if they disagree, only one is available, or neither is, ask the user directly. Never silently prefer one signal. Store the confirmed value in today's `day.json.timezone` so later steps reuse it without re-asking.                       |
 | `studioUrl` / port       | No       | Local studio URL. Default to `http://localhost:${WORKING_MEMORY_STUDIO_PORT:-3020}/studio` when the bundled studio is used.                           |
 | Zoom connector           | No       | Zoom MCP connector (`mcp__claude_ai_Zoom_for_Claude__*`) for meeting recaps/summaries/action items. Data tools load only after auth; discover them at runtime via `ToolSearch` (query `zoom`) and authenticate on first use. If unconfigured or unauthenticated, skip meeting-context scans. |
@@ -46,6 +46,8 @@ Internal installer flow:
 2. Configure local-only values outside shared docs: `archiveDir`, `timezone`, optional `studioUrl`, and optional source connector settings.
 3. Run the morning flow once in manual-only mode to create the archive and confirm the studio can read it.
 4. Add source connectors or direct deploy later only if the user wants the advanced setup.
+
+When the user asks to "set up", "first-time setup", "configure", or "install" working memory, read [references/setup-flow.md](references/setup-flow.md) and execute the wizard there instead of doing steps 2-4 above ad hoc — it covers the same ground interactively (prereq check, the direct-deploy trust question, config write, script run, verify).
 
 ## JSON Archive Strategy
 

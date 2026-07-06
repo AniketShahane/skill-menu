@@ -40,16 +40,20 @@ Clone the repo, then install the skill:
 ```bash
 git clone <this-repo-url> skill-menu
 cd skill-menu
-./working-memory/scripts/install-skill.sh
+./working-memory/scripts/install-skill.sh --claude   # use --codex for Codex
 ```
 
-`install-skill.sh` copies the skill into your agent's skills directory:
+`install-skill.sh` copies the skill into your agent's skills directory. Pick the
+agent with `--claude` or `--codex` (or set `WORKING_MEMORY_INSTALL_AGENT`); it
+defaults to Claude:
 - **Claude Code:** `~/.claude/skills/working-memory` (override with `CLAUDE_HOME`)
 - **Codex:** `~/.codex/skills/working-memory` (override with `CODEX_HOME`)
 
 You can also set an explicit target with `WORKING_MEMORY_SKILL_INSTALL_DIR`.
 
-Then just ask your agent to "run my morning standup" or "start my day."
+Then ask your agent to **"set up working memory"** for a guided one-time setup
+(prerequisite check, optional background-agent deploy, config write, and a health
+check), or jump straight in with "run my morning standup."
 
 ### Running the studio
 
