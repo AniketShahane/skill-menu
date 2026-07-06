@@ -1,0 +1,20 @@
+# dependencies / build artifacts
+node_modules/
+.next/
+coverage/
+tsconfig.tsbuildinfo
+*.log
+
+# secrets (never commit)
+.env
+.env.*
+*.env
+credentials*
+
+# OS / editor
+.DS_Store
+*.swp
+*~
+
+# runtime working-memory archive (personal notes must never be committed)
+**/assets/daily-notes/
