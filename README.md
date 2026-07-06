@@ -58,14 +58,13 @@ check), or jump straight in with "run my morning standup."
 ### Running the studio
 
 ```bash
-cd working-memory/assets/working-memory-viewer
-npm ci
-../../scripts/ensure-studio.sh   # builds + serves the board on http://127.0.0.1:3020
+./working-memory/scripts/ensure-studio.sh   # installs deps + serves the board on http://127.0.0.1:3020
 ```
 
-The studio auto-resolves the `claude` binary and stores your archive in your XDG data
-directory by default. Override the archive location with `INTERACTIVE_MEMORY_DIR` and the
-port with `WORKING_MEMORY_STUDIO_PORT`.
+`ensure-studio.sh` copies the studio into a cache directory, installs its dependencies, and
+starts the server for you, so there's no separate `npm ci` step. It auto-resolves the `claude`
+binary and stores your archive in your XDG data directory by default. Override the archive
+location with `INTERACTIVE_MEMORY_DIR` and the port with `WORKING_MEMORY_STUDIO_PORT`.
 
 ---
 
