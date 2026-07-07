@@ -88,6 +88,7 @@ jq -r '.issues.nodes[] | "\(.key) [\(.fields.status.name)] [\(.fields.priority.n
 - If a meeting has a clear action-item description (agenda, pre-work), surface it as a potential Tasks item.
 - For the interactive workspace, normalize the connector result into `${archiveDir}/{YYYY-MM-DD}/calendar.json`. The morning flow writes it alongside today's `day.json`, sets `day.json.lifecycle.morningRunAt`, and refreshes root `_index.json`. Do not use local Google OAuth. Capture start/end/title/status/self response/link/location/direct meeting join URL/organizer/attendee count when present, but do not store full event descriptions by default.
 - Store direct join links in `meetingUrl` and Google Calendar event links in `htmlLink`. If only one link is available, store the available link in the right field; do not invent a join URL from a calendar permalink.
+- Write `start`/`end` as RFC3339 with an explicit offset (`Z` or `±hh:mm`), exactly as the connector returns them; do not hand-convert between timezones. The studio converts absolute timestamps into the file's `timezone` for display. All-day events are the exception: keep the local date (midnight-to-midnight) with `allDay: true` so the date never shifts.
 
 ### Interactive Calendar JSON Shape
 

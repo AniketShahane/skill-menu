@@ -3419,24 +3419,37 @@ button {
 }
 
 /* Interactive studio planning polish: agent-ready capture, ideas, overlaps, and readable drags. */
-.studio-drag-overlay {
+/* The drag overlay portals outside .studio-shell, so it needs its own token defaults.
+   :where() keeps them at zero specificity so the overlay's theme-* class (same palette
+   as the board) can override them; the ghost then follows the active palette. */
+:where(.studio-drag-overlay) {
+  --studio-surface: rgba(255, 255, 255, 0.86);
+  --studio-surface-strong: #ffffff;
+  --studio-surface-muted: #eef3f7;
   --studio-border: rgba(29, 46, 64, 0.14);
+  --studio-border-strong: rgba(29, 46, 64, 0.22);
   --studio-text: #17212b;
   --studio-text-soft: #516174;
   --studio-text-muted: #64748b;
   --studio-primary: #0d9488;
+  --studio-primary-ink: #ffffff;
   --studio-accent: #ff6f61;
+  --studio-info: #2563eb;
   --studio-warning: #d97706;
+  --studio-success: #159466;
+  --studio-comms: #d9467a;
   --studio-shadow: rgba(26, 38, 54, 0.12);
   --studio-card: rgba(255, 255, 255, 0.94);
-  --studio-drag-surface: rgba(255, 255, 255, 0.92);
-  --studio-drag-text: #17212b;
-  pointer-events: none;
+  --studio-card-hover: #fbfdff;
+  --studio-ticket-bg:
+    linear-gradient(135deg, rgba(13, 148, 136, 0.16), rgba(37, 99, 235, 0.1)), #ffffff;
+  --studio-meeting-bg: linear-gradient(135deg, rgba(217, 70, 122, 0.78), rgba(255, 111, 97, 0.72));
+  --studio-drag-surface: var(--studio-card);
+  --studio-drag-text: var(--studio-text);
 }
 
-.theme-night-arcade {
-  --studio-drag-surface: rgba(9, 14, 20, 0.94);
-  --studio-drag-text: #f7fbff;
+.studio-drag-overlay {
+  pointer-events: none;
 }
 
 .drag-ghost {

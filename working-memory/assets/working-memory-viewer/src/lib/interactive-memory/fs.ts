@@ -996,22 +996,62 @@ function normalizeCalendarFile(
   date: string,
   timezone = getWorkingMemoryTimeZone(),
 ): CalendarFile {
+  const resolvedTimezone = normalizeOptionalText(calendar?.timezone) || timezone;
   return {
     schemaVersion: CALENDAR_SCHEMA_VERSION,
     date: normalizeOptionalText(calendar?.date) || date,
-    timezone: normalizeOptionalText(calendar?.timezone) || timezone,
+    timezone: resolvedTimezone,
     source: normalizeCalendarSource(calendar?.source),
     generatedAt: normalizeOptionalText(calendar?.generatedAt) || new Date().toISOString(),
     meetings: Array.isArray(calendar?.meetings)
-      ? calendar.meetings.map((meeting, index) => normalizeCalendarMeeting(meeting, index))
+      ? calendar.meetings.map((meeting, index) =>
+          normalizeCalendarMeeting(meeting, index, resolvedTimezone),
+        )
       : [],
     error: normalizeOptionalText(calendar?.error),
   };
 }
 
-function normalizeCalendarMeeting(meeting: unknown, index: number): CalendarMeeting {
+// Connector-written meeting times may be UTC ("...T15:00:00Z") or carry any UTC offset,
+// while the studio renders start/end as wall-clock in the calendar's timezone. Rewrite
+// absolute timestamps to that wall clock; leave naive strings and unparseable values as-is.
+const ABSOLUTE_TIME_SUFFIX = /(?:Z|[+-]\d{2}:?\d{2})$/i;
+
+function toCalendarWallClock(value: string, timeZone: string) {
+  if (!value || !ABSOLUTE_TIME_SUFFIX.test(value)) return value;
+  const instant = new Date(value);
+  if (!Number.isFinite(instant.getTime())) return value;
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(instant);
+    const field = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${field.year}-${field.month}-${field.day}T${field.hour}:${field.minute}:${field.second}`;
+  } catch {
+    return value;
+  }
+}
+
+function normalizeCalendarMeeting(
+  meeting: unknown,
+  index: number,
+  timezone: string,
+): CalendarMeeting {
   const raw = meeting && typeof meeting === "object" ? (meeting as UnknownCalendarMeeting) : {};
-  const start = normalizeOptionalText(raw.start) || "";
+  const allDay = normalizeBoolean(raw.allDay);
+  const rawStart = normalizeOptionalText(raw.start) || "";
+  const rawEnd = normalizeOptionalText(raw.end);
+  // All-day events keep their local calendar date; converting a midnight UTC marker
+  // into the timezone would shift them onto the previous day.
+  const start = allDay ? rawStart : toCalendarWallClock(rawStart, timezone);
+  const end = rawEnd ? (allDay ? rawEnd : toCalendarWallClock(rawEnd, timezone)) : start;
   const responseStatus =
     normalizeOptionalText(raw.responseStatus) || normalizeOptionalText(raw.selfResponse);
 
@@ -1026,8 +1066,8 @@ function normalizeCalendarMeeting(meeting: unknown, index: number): CalendarMeet
       normalizeOptionalText(raw.subject) ||
       "Untitled event",
     start,
-    end: normalizeOptionalText(raw.end) || start,
-    allDay: normalizeBoolean(raw.allDay),
+    end,
+    allDay,
     status: normalizeOptionalText(raw.status),
     responseStatus,
     location: normalizeOptionalText(raw.location),
