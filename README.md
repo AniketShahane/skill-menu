@@ -1,79 +1,86 @@
 # skill-menu
 
-A menu of agent skills for [Claude Code](https://docs.claude.com/en/docs/claude-code) (and Codex), starting with **Working Memory**: a daily standup / shutdown ritual with a live visual studio.
+Agent skills for [Claude Code](https://docs.claude.com/en/docs/claude-code) and Codex. Each top-level folder is one self-contained skill: clone the repo, run the installer, and go.
 
-Each top-level folder is one self-contained skill. Clone it, install the skill you want, and go.
-
----
-
-## What's on the menu
-
-| Skill | What it does |
-|---|---|
-| [`working-memory`](./working-memory) | Runs a morning standup and evening shutdown over a file-backed daily-notes archive. Aggregates your open tasks, carries yesterday forward, and serves an optional local web "studio" that renders the day as an interactive board. |
-
-More skills will be added over time.
+First on the menu: **Working Memory**, a daily planning ritual with a live visual board.
 
 ---
 
-## Working Memory, in one screen
+## What Working Memory does
 
-- **Morning standup:** builds today's plan from your open items and yesterday's carry-forward, then writes a structured day file.
-- **Evening shutdown:** reviews what got done, rolls the rest forward, and closes the day.
-- **The studio (optional):** a small Next.js app that reads your archive and renders it as a live board (drag tasks across lanes, mark them done, capture new ones). Runs entirely on `127.0.0.1`.
+It turns your day into a plan your agent actually maintains:
 
-Your notes never leave your machine (see [Your data](#your-data)).
+- **Morning standup.** Scans your open items and yesterday's leftovers, then interviews you one task at a time until each task has a clear outcome, done-criteria, and time estimate. Writes it all to a local JSON archive.
+- **During the day.** Say "add a task" or "capture this" to drop new work in. Say "track Sam's report" to follow someone else's deliverable without making it your task.
+- **Evening shutdown.** Reviews what got done, rolls the rest into tomorrow, closes the day.
+- **The studio (optional).** A local web board at `http://127.0.0.1:3020/studio` that shows your day as draggable lanes: move tasks, mark them done, capture new ones. Runs only on your machine.
 
----
-
-## Requirements
-
-- **Claude Code** or **Codex** (the skill is agent-agnostic).
-- **Node.js 20+** and npm, only if you want the visual studio.
+The payoff: every task comes out **agent-ready**. Because the standup forces a real objective and done-criteria, any task can be copied out as a complete brief and handed to a coding agent to execute.
 
 ---
 
-## Install
+## Install (2 minutes)
 
-Clone the repo, then install the skill:
+You need Claude Code or Codex. Node.js 20+ only if you want the studio board.
 
 ```bash
-git clone <this-repo-url> skill-menu
+git clone https://gitlab.com/ashahane1/skill-menu.git
 cd skill-menu
-./working-memory/scripts/install-skill.sh --claude   # use --codex for Codex
+./working-memory/scripts/install-skill.sh --claude   # or --codex
 ```
 
-`install-skill.sh` copies the skill into your agent's skills directory. Pick the
-agent with `--claude` or `--codex` (or set `WORKING_MEMORY_INSTALL_AGENT`); it
-defaults to Claude:
-- **Claude Code:** `~/.claude/skills/working-memory` (override with `CLAUDE_HOME`)
-- **Codex:** `~/.codex/skills/working-memory` (override with `CODEX_HOME`)
+Then open your agent and say:
 
-You can also set an explicit target with `WORKING_MEMORY_SKILL_INSTALL_DIR`.
+> **"set up working memory"**
 
-Then ask your agent to **"set up working memory"** for a guided one-time setup
-(prerequisite check, optional background-agent deploy, config write, and a health
-check), or jump straight in with "run my morning standup."
+That runs a guided one-time wizard: it checks prerequisites, asks where to store your notes, writes the config, and verifies everything with a health check. When it finishes, you're ready.
 
-### Running the studio
+To start the studio board:
 
 ```bash
-./working-memory/scripts/ensure-studio.sh   # installs deps + serves the board on http://127.0.0.1:3020
+./working-memory/scripts/ensure-studio.sh   # installs deps + serves http://127.0.0.1:3020/studio
 ```
 
-`ensure-studio.sh` copies the studio into a cache directory, installs its dependencies, and
-starts the server for you, so there's no separate `npm ci` step. It auto-resolves the `claude`
-binary and stores your archive in your XDG data directory by default. Override the archive
-location with `INTERACTIVE_MEMORY_DIR` and the port with `WORKING_MEMORY_STUDIO_PORT`.
+Stop it anytime with `./working-memory/scripts/stop-studio.sh`.
+
+---
+
+## Daily use: what to say
+
+| You say | What happens |
+|---|---|
+| "run my morning standup" | Builds today's plan, task by task, with your approval |
+| "add a task" / "capture this" | Quick-adds one item to today |
+| "track [person]'s work" | Adds a tracker for someone else's deliverable |
+| "show today's plan" | Summarizes tasks, trackers, and schedule |
+| "evening shutdown" | Closes the day, carries leftovers to tomorrow |
+
+---
+
+## Getting the most out of it
+
+1. **Run both rituals daily.** Carry-forward is the whole engine: skipped shutdowns mean lost context the next morning.
+2. **Answer the standup questions honestly.** It asks "what proves this is done?" for a reason. A well-grilled task is a brief you can delegate; a vague one is just a reminder.
+3. **Keep the studio open.** Plans change by 11am. Dragging a task to Done or capturing a new one takes two seconds and keeps the archive true.
+4. **Use trackers for other people's work.** Waiting on a review or a handoff? Track it instead of letting it squat in your task list.
+5. **Respect the 1-3-5 shape.** One focus item, three tasks, five quick items. The skill suggests it softly; overloaded days get a cut line, not silent overbooking.
+6. **Connect sources when ready.** The skill works fully manual out of the box. Wire up Slack, Gmail, Jira, or Calendar connectors later and the morning scan starts finding candidate work for you.
 
 ---
 
 ## Your data
 
-The daily-notes archive is **runtime data, not source**. By default it lives in your
-XDG data directory (`$XDG_DATA_HOME/working-memory`, e.g. `~/.local/share/working-memory`),
-never inside this repo. The installer explicitly skips it, and `.gitignore` blocks any
-`assets/daily-notes/` folder, so no one's personal notes can ever be committed here.
+Everything stays on your machine. Notes live in your local data directory (`~/.local/share/working-memory` by default), never inside this repo, and the studio serves only `127.0.0.1`. The installer skips your archive and `.gitignore` blocks it, so personal notes can never be committed here.
+
+Useful overrides, all optional:
+
+| Variable | Controls |
+|---|---|
+| `INTERACTIVE_MEMORY_DIR` | Where your notes archive lives |
+| `WORKING_MEMORY_STUDIO_PORT` | Studio port (default 3020) |
+| `CLAUDE_HOME` / `CODEX_HOME` | Where the skill installs |
+
+Persistent overrides go in `~/.config/working-memory/ensure-studio.local.sh`, which the studio script loads automatically.
 
 ---
 
@@ -81,11 +88,11 @@ never inside this repo. The installer explicitly skips it, and `.gitignore` bloc
 
 ```
 skill-menu/
-  README.md
   working-memory/
-    SKILL.md              # the skill definition the agent reads
-    references/           # standup/shutdown flow docs + note templates
-    scripts/              # install + studio lifecycle scripts
-    assets/
-      working-memory-viewer/   # the Next.js studio (source only)
+    SKILL.md          # the skill definition your agent reads
+    references/       # standup / shutdown / setup flows
+    scripts/          # install + studio lifecycle
+    assets/           # the studio web app (source only)
 ```
+
+More skills will be added over time.
