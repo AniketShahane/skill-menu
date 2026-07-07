@@ -158,9 +158,11 @@ const DENSITY_OPTIONS = [
 ] as const;
 const PALETTE_OPTIONS = [
   { value: "clear-day", label: "Clear Day" },
-  { value: "signal-desk", label: "Signal Desk" },
-  { value: "fresh-circuit", label: "Fresh Circuit" },
-  { value: "paper-pop", label: "Paper Pop" },
+  { value: "neon-noir", label: "Neon Noir" },
+  { value: "sunset-disco", label: "Sunset Disco" },
+  { value: "tidepool", label: "Tidepool" },
+  { value: "hologram", label: "Hologram" },
+  { value: "brat", label: "Brat" },
   { value: "night-arcade", label: "Night Arcade" },
 ] as const;
 const ROW_HEIGHT_BY_DENSITY: Record<DensityMode, number> = {
@@ -3168,7 +3170,7 @@ function DayCalendar({
     },
   });
   const currentMinute = useCurrentMinute(day.date, day.timezone);
-  const range = useMemo(() => buildCalendarRange(day), [day]);
+  const range = useMemo(() => buildCalendarRange(day, calendar.meetings), [day, calendar.meetings]);
   const visualSlots = useMemo(
     () => buildSlots(range.startMinute, range.endMinute, range.slotMinutes),
     [range.startMinute, range.endMinute, range.slotMinutes],
@@ -5304,7 +5306,10 @@ function useCurrentMinute(date: string, timezone: string) {
   return minute;
 }
 
-function buildCalendarRange(day: DayPlan): CalendarRange {
+function buildCalendarRange(
+  day: DayPlan,
+  meetings: CalendarFile["meetings"] = [],
+): CalendarRange {
   const slotMinutes = normalizeEstimateMinutes(day.settings.slotMinutes || WORKDAY_SLOT_MINUTES);
   const baseStartMinute = Math.max(0, Math.min(23 * 60, day.settings.startHour * 60));
   const baseEndMinute = Math.max(
@@ -5312,9 +5317,38 @@ function buildCalendarRange(day: DayPlan): CalendarRange {
     Math.min(24 * 60, day.settings.endHour * 60),
   );
 
+  // Keep the configured window (default 8am-6pm) as the baseline, but stretch it
+  // to fit any scheduled item that falls outside it, so out-of-hours meetings,
+  // tasks, and breaks are shown instead of being hidden or clipped. When nothing
+  // falls outside the configured hours the window is unchanged.
+  let contentStart = baseStartMinute;
+  let contentEnd = baseEndMinute;
+  const extend = (rawStart: string, rawEnd: string, minSpan: number) => {
+    const start = minuteOfDay(rawStart);
+    if (!Number.isFinite(start)) return;
+    const end = Math.max(minuteOfDay(rawEnd), start + minSpan);
+    if (!Number.isFinite(end)) return;
+    contentStart = Math.min(contentStart, start);
+    contentEnd = Math.max(contentEnd, end);
+  };
+  for (const meeting of meetings) {
+    if (meeting.allDay) continue;
+    extend(meeting.start, meeting.end, 15);
+  }
+  for (const task of day.tasks) {
+    if (!task.scheduledStart || !task.scheduledEnd) continue;
+    extend(task.scheduledStart, task.scheduledEnd, CALENDAR_INTERACTION_MINUTES);
+  }
+  for (const dayBreak of day.breaks) {
+    extend(dayBreak.start, dayBreak.end, 5);
+  }
+
+  const startMinute = Math.max(0, Math.min(23 * 60, contentStart));
+  const endMinute = Math.max(startMinute + slotMinutes, Math.min(24 * 60, contentEnd));
+
   return {
-    startMinute: floorToInterval(baseStartMinute, slotMinutes),
-    endMinute: Math.min(24 * 60, ceilToInterval(baseEndMinute, slotMinutes)),
+    startMinute: floorToInterval(startMinute, slotMinutes),
+    endMinute: Math.min(24 * 60, ceilToInterval(endMinute, slotMinutes)),
     slotMinutes,
   };
 }
