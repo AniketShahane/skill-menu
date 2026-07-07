@@ -132,15 +132,8 @@ button {
 .studio-shell {
   min-height: 100vh;
   overflow: hidden;
-  background:
-    linear-gradient(90deg, rgba(61, 242, 180, 0.08) 1px, transparent 1px),
-    linear-gradient(0deg, rgba(255, 224, 102, 0.06) 1px, transparent 1px),
-    linear-gradient(135deg, #080a0f 0%, #111821 38%, #17131b 66%, #0f1714 100%);
-  background-size:
-    32px 32px,
-    32px 32px,
-    auto;
-  color: #f7fbff;
+  background: color-mix(in srgb, var(--studio-primary) 16%, #ffffff);
+  color: var(--studio-text);
   padding: 18px;
 }
 
@@ -1204,7 +1197,7 @@ button {
   --studio-border-strong: rgba(29, 46, 64, 0.22);
   --studio-text: #17212b;
   --studio-text-soft: #516174;
-  --studio-text-muted: #758398;
+  --studio-text-muted: #64748b;
   --studio-primary: #0d9488;
   --studio-primary-ink: #ffffff;
   --studio-accent: #ff6f61;
@@ -1224,15 +1217,7 @@ button {
   color-scheme: light;
   min-height: 100vh;
   overflow: hidden;
-  background:
-    linear-gradient(90deg, var(--studio-grid-a) 1px, transparent 1px),
-    linear-gradient(0deg, var(--studio-grid-b) 1px, transparent 1px),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.72), transparent 34%), var(--studio-bg);
-  background-size:
-    32px 32px,
-    32px 32px,
-    auto,
-    auto;
+  background: color-mix(in srgb, var(--studio-primary) 16%, #ffffff);
   color: var(--studio-text);
   padding: 14px;
 }
@@ -1654,7 +1639,7 @@ button {
 .copy-prompt-button,
 .calendar-sync-button {
   background: var(--studio-accent);
-  color: var(--studio-primary-ink);
+  color: color-mix(in srgb, #10151c 86%, var(--studio-accent));
 }
 
 .lane-grid {
@@ -1775,7 +1760,7 @@ button {
   border: 1px solid color-mix(in srgb, var(--source-color) 38%, var(--studio-border));
   border-radius: 999px;
   background: color-mix(in srgb, var(--source-color) 12%, transparent);
-  color: var(--source-color);
+  color: color-mix(in srgb, var(--source-color) 48%, var(--studio-text));
   font-size: 11px;
   font-weight: 900;
   line-height: 1.2;
@@ -2163,13 +2148,13 @@ button {
 
 .appearance-trigger:disabled {
   cursor: not-allowed;
-  opacity: 0.48;
+  opacity: 0.6;
 }
 
 .appearance-trigger-capture {
   border-color: color-mix(in srgb, var(--studio-info) 42%, var(--studio-border));
   background: color-mix(in srgb, var(--studio-info) 16%, var(--studio-surface-muted));
-  color: var(--studio-info);
+  color: color-mix(in srgb, var(--studio-info) 55%, var(--studio-text));
 }
 
 .appearance-trigger-capture:hover:not(:disabled) {
@@ -2189,7 +2174,7 @@ button {
     var(--appearance-trigger-prompt-tint) 16%,
     var(--studio-surface-muted)
   );
-  color: var(--appearance-trigger-prompt-tint);
+  color: color-mix(in srgb, var(--appearance-trigger-prompt-tint) 55%, var(--studio-text));
 }
 
 .appearance-trigger-prompt:hover:not(:disabled) {
@@ -2210,6 +2195,14 @@ button {
 
 .appearance-trigger-deploy:hover:not(:disabled) {
   filter: brightness(1.06);
+}
+
+.appearance-trigger-deploy:disabled {
+  background: color-mix(in srgb, var(--studio-primary) 18%, var(--studio-surface-muted));
+  border-color: color-mix(in srgb, var(--studio-primary) 32%, var(--studio-border));
+  box-shadow: none;
+  color: color-mix(in srgb, var(--studio-primary) 22%, var(--studio-text-soft));
+  opacity: 1;
 }
 
 /* Button press microinteractions: header CTAs + segmented tabs. */
@@ -3430,7 +3423,7 @@ button {
   --studio-border: rgba(29, 46, 64, 0.14);
   --studio-text: #17212b;
   --studio-text-soft: #516174;
-  --studio-text-muted: #758398;
+  --studio-text-muted: #64748b;
   --studio-primary: #0d9488;
   --studio-accent: #ff6f61;
   --studio-warning: #d97706;
@@ -3919,7 +3912,7 @@ button {
   border: 1px solid color-mix(in srgb, var(--kind-bg) 36%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--kind-bg) 18%, transparent);
-  color: var(--kind-text);
+  color: color-mix(in srgb, var(--kind-bg) 42%, var(--studio-text));
   font-size: 10px;
   font-weight: 950;
   line-height: 1;
@@ -3967,7 +3960,6 @@ button {
   --kind-text: #451600;
 }
 
-.theme-night-arcade .kind-badge,
 .drag-ghost .kind-badge {
   color: var(--studio-text);
 }
@@ -4954,7 +4946,7 @@ button {
   border: 1px solid color-mix(in srgb, var(--studio-success) 36%, var(--studio-border));
   border-radius: 999px;
   background: color-mix(in srgb, var(--studio-success) 14%, transparent);
-  color: var(--studio-success);
+  color: color-mix(in srgb, var(--studio-success) 45%, var(--studio-text));
   font-size: 10px;
   font-weight: 950;
   line-height: 1;
@@ -6398,7 +6390,7 @@ button {
   border: 1px solid color-mix(in srgb, var(--tracker-accent) 24%, var(--studio-border));
   border-radius: 999px;
   background: color-mix(in srgb, var(--tracker-accent) 10%, transparent);
-  color: var(--tracker-accent-ink);
+  color: color-mix(in srgb, var(--tracker-accent-ink) 48%, var(--studio-text));
   font-size: 8px;
   font-weight: 950;
   letter-spacing: 0;
@@ -7164,13 +7156,13 @@ button {
 .work-depth-deep {
   border: 1px solid rgba(37, 99, 235, 0.34);
   background: rgba(37, 99, 235, 0.12);
-  color: #143d91;
+  color: color-mix(in srgb, #2563eb 42%, var(--studio-text));
 }
 
 .work-depth-shallow {
   border: 1px solid rgba(13, 148, 136, 0.34);
   background: rgba(13, 148, 136, 0.12);
-  color: #0f5b55;
+  color: color-mix(in srgb, #0d9488 42%, var(--studio-text));
 }
 
 .agent-fields-panel,
