@@ -304,7 +304,7 @@ Use fewer questions for obvious quick/shallow work, but do not skip the core sou
 ### Rules:
 
 - Ask about one selected active task at a time. Never ask for views on all selected tasks in one batch.
-- Ask every question through the AskUserQuestion tool, never as plain-text prose in chat. The interview is always conducted via AskUserQuestion; this is non-optional.
+- Do not use the AskUserQuestion tool for grilling; option lists invite rubber-stamping the default. Ask the missing questions as one concise numbered list in plain chat text, open-ended with no suggested options, phrased concretely for this task (name the artifact, repo, or decision). The user answers each in their own words, in one reply or several.
 - For each task, show a small heading: `Qualifying task N/M: {title}`.
 - Ask only the missing questions for that task. For focus/deep/code/data/production/delegated/source-dependent work, do not skip outcome, authoritative source, scope/non-goals, done criteria, verification, or estimate.
 - Wait for the user's answer before doing any repo/source lookup for that task.

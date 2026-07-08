@@ -196,7 +196,7 @@ During source scans, the skill may recommend trackers for other people's deliver
 **Tiered qualification** (shared with `/jira` skill):
 
 - For morning planning and Quick Add active tasks, grill one selected active task at a time. Do not batch all deep-work questions globally.
-- Always conduct the grilling interview through the AskUserQuestion tool, never as plain-text questions in chat. This is non-optional: every qualification question (outcome, authoritative source, scope/non-goals, done criteria, verification, estimate) is asked via AskUserQuestion.
+- Do not use the AskUserQuestion tool for grilling; presenting options invites rubber-stamping the default. Ask every qualification question (outcome, authoritative source, scope/non-goals, done criteria, verification, estimate) as one concise numbered list in plain chat text, open-ended with no suggested answers, phrased concretely for this task, so the user answers each in their own words.
 - The unified inbox can list all candidates, but it is candidate discovery only. It does not approve any active task.
 - `"looks good"` accepts the classification only. It never skips the one-task-at-a-time qualification loop.
 - Ask before repo lookup. The user names the intended source/repo/branch/doc/thread first; then inspect only that target.
