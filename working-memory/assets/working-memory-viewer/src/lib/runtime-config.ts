@@ -37,6 +37,16 @@ export function isDirectAgentDeployEnabled() {
   return TRUE_ENV_VALUES.has(envText("WORKING_MEMORY_ENABLE_DIRECT_DEPLOY")?.toLowerCase() || "");
 }
 
+export function isGrillEnabled() {
+  return TRUE_ENV_VALUES.has(envText("WORKING_MEMORY_ENABLE_GRILL")?.toLowerCase() || "");
+}
+
+export function getGrillTimeoutMs() {
+  const configured = Number.parseInt(envText("WORKING_MEMORY_GRILL_TIMEOUT_MS") || "", 10);
+  const timeoutMs = Number.isFinite(configured) ? configured : 120000;
+  return Math.max(timeoutMs, 10000);
+}
+
 export function getClaudeBin() {
   return envText("WORKING_MEMORY_CLAUDE_BIN") || "claude";
 }

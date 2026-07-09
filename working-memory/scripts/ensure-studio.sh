@@ -80,11 +80,18 @@ expected_direct_deploy() {
   esac
 }
 
+expected_grill_enabled() {
+  case "${WORKING_MEMORY_ENABLE_GRILL:-}" in
+    1|true|TRUE|True|yes|YES|Yes|on|ON|On) printf 'true\n' ;;
+    *) printf 'false\n' ;;
+  esac
+}
+
 studio_ready() {
   local health_payload current_payload expected_agent_cwd
   health_payload="$(curl -fsS --max-time 2 "$HEALTH_URL" 2>/dev/null)" || return 1
   expected_agent_cwd="${WORKING_MEMORY_AGENT_CWD:-${WORKING_MEMORY_ROOT_DIR:-}}"
-  node - "$health_payload" "$INTERACTIVE_MEMORY_DIR" "$WORKING_MEMORY_TIMEZONE" "$(expected_direct_deploy)" "$expected_agent_cwd" "$WORKING_MEMORY_CLAUDE_BIN" <<'NODE' >/dev/null 2>&1 || return 1
+  node - "$health_payload" "$INTERACTIVE_MEMORY_DIR" "$WORKING_MEMORY_TIMEZONE" "$(expected_direct_deploy)" "$expected_agent_cwd" "$WORKING_MEMORY_CLAUDE_BIN" "$(expected_grill_enabled)" <<'NODE' >/dev/null 2>&1 || return 1
 const path = require("node:path");
 const payload = JSON.parse(process.argv[2]);
 const expectedArchive = path.resolve(process.argv[3]);
@@ -92,6 +99,7 @@ const expectedTimezone = process.argv[4];
 const expectedDirectDeploy = process.argv[5] === "true";
 const expectedAgentCwd = process.argv[6] ? path.resolve(process.argv[6]) : "";
 const expectedClaudeBin = process.argv[7] || "";
+const expectedGrillEnabled = process.argv[8] === "true";
 const config = payload.config || {};
 const actualArchive = config.interactiveMemoryDir
   ? path.resolve(config.interactiveMemoryDir)
@@ -104,7 +112,8 @@ process.exit(
     config.timezone === expectedTimezone &&
     Boolean(config.directDeployEnabled) === expectedDirectDeploy &&
     agentCwdMatches &&
-    claudeBinMatches
+    claudeBinMatches &&
+    Boolean(config.grillEnabled) === expectedGrillEnabled
     ? 0
     : 1,
 );

@@ -54,6 +54,7 @@ Stop it anytime with `./working-memory/scripts/stop-studio.sh`.
 | "track [person]'s work" | Adds a tracker for someone else's deliverable |
 | "show today's plan" | Summarizes tasks, trackers, and schedule |
 | "evening shutdown" | Closes the day, carries leftovers to tomorrow |
+| Click "Grill" / "Re-grill" on a task in the studio | Runs the qualification interview in-app and drafts the ticket fields for you to accept (needs `WORKING_MEMORY_ENABLE_GRILL=true`) |
 
 ---
 
@@ -78,6 +79,7 @@ Useful overrides, all optional:
 |---|---|
 | `INTERACTIVE_MEMORY_DIR` | Where your notes archive lives |
 | `WORKING_MEMORY_STUDIO_PORT` | Studio port (default 3020) |
+| `WORKING_MEMORY_ENABLE_GRILL` | Turn on in-app grilling (Grill/Re-grill buttons) in the studio; default off |
 | `CLAUDE_HOME` / `CODEX_HOME` | Where the skill installs |
 
 Persistent overrides go in `~/.config/working-memory/ensure-studio.local.sh`, which the studio script loads automatically.

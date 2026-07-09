@@ -93,6 +93,8 @@ Open the same app for every day:
 - Resolved `studioUrl` loads the current day in resolved `timezone`.
 - `http://localhost:3020/studio?date=YYYY-MM-DD` loads a specific archived day.
 
+When `WORKING_MEMORY_ENABLE_GRILL=true` is set, the studio can also run the qualification interview directly in the app: "Grill" on a captured or carried-forward task that is not yet ready, or "Re-grill" on a ready task whose fields have gone stale, opens a drawer that asks the same missing-field questions, drafts `ticketFields`, and writes them back only after explicit accept. It shares the question set and field rules in [assets/working-memory-viewer/content/grilling-contract.md](assets/working-memory-viewer/content/grilling-contract.md) with the chat flow below. The chat-based flow remains canonical for morning planning; in-app grilling is a convenience for board-captured tasks, off by default.
+
 For each active task, populate `ticketFields.objective`, `ticketFields.doneWhen`, and the other structured fields that are needed for the task's complexity. Also populate `agentName`, `workDepth`, `estimateMinutes`, `sourceRefs`, `agentReadiness`, `readinessWarnings`, and preserve any app-written `agentRuns[]`. The app generates the copy-agent `ticketBody` from `ticketFields`; do not store `ticketBody`, `brief`, or `rawThoughts` in schema v8 tasks.
 
 Active tasks written by the morning flow should be `agentReadiness: "ready"`. If a task is not ready after grilling, do not put it in active `tasks[]`; record it below the cut line in `ideas.text` with the missing decision named.

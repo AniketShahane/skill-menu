@@ -15,6 +15,7 @@ import {
 } from "@/lib/interactive-memory/fs";
 import { assertDateKey } from "@/lib/interactive-memory/paths";
 import { renderAgentPrompt } from "@/lib/interactive-memory/prompt";
+import { assertLocalOrigin, ForbiddenOriginError } from "@/lib/interactive-memory/route-guards";
 import { getAgentCwd, isDirectAgentDeployEnabled } from "@/lib/runtime-config";
 
 export const runtime = "nodejs";
@@ -32,6 +33,7 @@ type DeployPayload = {
 export async function POST(request: Request, context: RouteContext) {
   try {
     const { date: rawDate, taskId } = await context.params;
+    assertLocalOrigin(request);
     const date = assertDateKey(rawDate);
     const payload = (await request.json().catch(() => ({}))) as DeployPayload;
     const model = parseAgentModel(payload.model);
@@ -120,6 +122,9 @@ export async function POST(request: Request, context: RouteContext) {
       message: `Deployed ${agentModelLabel(model)} as ${name}.`,
     });
   } catch (error) {
+    if (error instanceof ForbiddenOriginError) {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
     if (error instanceof DaySaveConflictError) {
       return NextResponse.json(
         {

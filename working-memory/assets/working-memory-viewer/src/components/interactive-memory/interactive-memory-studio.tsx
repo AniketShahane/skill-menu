@@ -33,6 +33,8 @@ import {
   Loader2,
   Mail,
   MessageCircle,
+  MessageCircleQuestion,
+  MoreVertical,
   Palette,
   PencilLine,
   Plus,
@@ -58,6 +60,7 @@ import {
   memo,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
   useCallback,
   useContext,
   useEffect,
@@ -68,6 +71,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { sanitizeAgentName, suggestAgentName } from "@/lib/interactive-memory/agent-names";
+import type { GrillTurn } from "@/lib/interactive-memory/grill";
 import { MOTION } from "@/lib/interactive-memory/motion";
 import {
   buildCaptureSummary,
@@ -79,6 +83,7 @@ import {
   sourceLines,
   validatePromptTemplate,
 } from "@/lib/interactive-memory/prompt";
+import { buildNewTask } from "@/lib/interactive-memory/task-factory";
 import {
   type AgentModel,
   type AgentReadiness,
@@ -101,6 +106,12 @@ import {
   type WorkDepth,
 } from "@/lib/interactive-memory/types";
 import { cn } from "@/lib/utils";
+import {
+  type GrillActiveTurn,
+  GrillChatDrawer,
+  type GrillChatPhase,
+  type GrillTranscriptEntry,
+} from "./grill-chat-drawer";
 
 const STATUS_ORDER: TaskStatus[] = ["todo", "in_progress", "review", "done"];
 const TASK_KIND_META: Record<
@@ -292,6 +303,27 @@ type BatchDeployResult = {
   succeeded: string[];
   failed: Array<{ title: string; message: string }>;
 };
+// Grill v2 chat-first session state (spec section 7). A single session drives either a create
+// interview (born from a typed intent) or a revise interview (born from a task card). The
+// transcript is accumulated client-side because each route returns only the latest turn.
+type GrillErrorInfo = { message: string; canRetry: boolean };
+type GrillAnswerPayload = { message: string } | { draftNow: true };
+type GrillState = {
+  mode: "create" | "revise";
+  date: string;
+  grillId?: string; // absent only during the create intent phase / initial start
+  taskId?: string; // revise only
+  taskSnapshot?: TaskRecord; // revise: task at start, diff baseline until a task-changed 409
+  freshTask?: TaskRecord; // revise: fresh task returned by a task-changed 409
+  intent?: string; // create: the intent text, kept for retry + the copy-prompt fallback
+  entries: GrillTranscriptEntry[]; // client-accumulated history
+  active?: GrillActiveTurn; // the current turn awaiting user action
+  phase: GrillChatPhase;
+  error?: GrillErrorInfo;
+  lastAnswer?: GrillAnswerPayload; // last answer/correction payload, for Retry
+  failedStage?: "start" | "answer" | "apply";
+  acknowledgedTaskUpdatedAt?: string; // survives Retry so a re-confirmed apply stays acknowledged
+};
 type ProgressSummary = {
   done: number;
   total: number;
@@ -411,6 +443,7 @@ type CurrentStudioResponse = {
 type StudioHealthResponse = {
   config?: {
     directDeployEnabled?: boolean;
+    grillEnabled?: boolean;
   };
 };
 type CurrentResolution = Pick<
@@ -477,6 +510,8 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
   const [closeTrackerCandidateId, setCloseTrackerCandidateId] = useState<string | undefined>();
   const [calendarReloading, setCalendarReloading] = useState(false);
   const [deployState, setDeployState] = useState<DeployState | undefined>();
+  const [grillEnabled, setGrillEnabled] = useState(false);
+  const [grillState, setGrillState] = useState<GrillState | undefined>();
   const [batchDeployOpen, setBatchDeployOpen] = useState(false);
   const [batchDeploySnapshot, setBatchDeploySnapshot] = useState<
     Array<{ id: string; title: string }>
@@ -498,6 +533,7 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
   const baseUpdatedAtRef = useRef<string | undefined>(undefined);
   const latestUpdatedAtRef = useRef<string | undefined>(undefined);
   const latestPayloadRef = useRef<string | undefined>(undefined);
+  const grillRunRef = useRef(0);
   const modalTitleId = selectedTaskId ? `task-modal-title-${selectedTaskId}` : undefined;
   const prefersReducedMotion = useReducedMotion();
   const rowHeight = Math.max(ROW_HEIGHT_BY_DENSITY[densityMode], ROW_HEIGHT_BY_DENSITY.comfortable);
@@ -585,6 +621,7 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
             ? undefined
             : "Direct deploy is disabled. Set WORKING_MEMORY_ENABLE_DIRECT_DEPLOY=true to enable it.",
         );
+        setGrillEnabled(Boolean(payload.config?.grillEnabled));
       })
       .catch((error) => {
         if (cancelled) return;
@@ -593,6 +630,7 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
             ? `Could not verify direct deploy config: ${error.message}`
             : "Could not verify direct deploy config.",
         );
+        setGrillEnabled(false);
       });
 
     return () => {
@@ -900,6 +938,427 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
     }
   }
 
+  // --- Grill v2: chat-first ticket creation and revision (spec section 7) ---
+  // The parent owns the session state machine and every fetch; GrillChatDrawer renders it. Each
+  // route returns only the latest turn, so the transcript is accumulated here client-side.
+
+  async function grillRequest(
+    url: string,
+    init: RequestInit,
+  ): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> {
+    const response = await fetch(url, init);
+    const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    return { ok: response.ok, status: response.status, body };
+  }
+
+  function grillTurnToActive(turn: GrillTurn, computedWarnings?: string[]): GrillActiveTurn {
+    if (turn.kind === "proposal") {
+      return { kind: "proposal", proposal: turn, warnings: computedWarnings ?? [] };
+    }
+    return { kind: "questions", note: turn.note, questions: turn.questions };
+  }
+
+  // Map an HTTP failure to a phase (spec 7.2): 410 loses the conversation; 503 (CLI missing) has
+  // no retry and only the copy-prompt fallback; 502/504/500/network offer Retry.
+  function applyGrillFailure(status: number, message: string, stage: "start" | "answer" | "apply") {
+    setGrillState((current) => {
+      if (!current) return current;
+      if (status === 410)
+        return { ...current, phase: "lost", error: undefined, failedStage: stage };
+      return {
+        ...current,
+        phase: "error",
+        error: { message, canRetry: status !== 503 },
+        failedStage: stage,
+      };
+    });
+  }
+
+  function discardGrill() {
+    grillRunRef.current += 1;
+    const current = grillState;
+    if (current?.grillId) {
+      void fetch(`/api/studio/day/${current.date}/grill/${current.grillId}`, {
+        method: "DELETE",
+      }).catch(() => {});
+    }
+    setGrillState(undefined);
+  }
+
+  function grillNewTicket() {
+    if (!date) return;
+    discardGrill();
+    setGrillState({ mode: "create", date, entries: [], phase: "intent" });
+  }
+
+  async function runGrillCreateStart(grillDate: string, intent: string) {
+    const runId = ++grillRunRef.current;
+    setGrillState((prev) =>
+      prev ? { ...prev, intent, phase: "waiting", error: undefined } : prev,
+    );
+    try {
+      const { ok, status, body } = await grillRequest(`/api/studio/day/${grillDate}/grill`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "create", intent }),
+      });
+      if (grillRunRef.current !== runId) return;
+      if (!ok) {
+        applyGrillFailure(status, (body.error as string) || `HTTP ${status}`, "start");
+        return;
+      }
+      const active = grillTurnToActive(body.turn as GrillTurn, body.computedWarnings as string[]);
+      setGrillState((prev) =>
+        prev
+          ? {
+              ...prev,
+              grillId: body.grillId as string,
+              active,
+              phase: active.kind === "proposal" ? "proposal" : "chatting",
+              error: undefined,
+            }
+          : prev,
+      );
+    } catch (error) {
+      if (grillRunRef.current !== runId) return;
+      applyGrillFailure(
+        0,
+        error instanceof Error ? error.message : "Could not start the grill interview.",
+        "start",
+      );
+    }
+  }
+
+  function sendGrillIntent(intent: string) {
+    const current = grillState;
+    if (!current || current.mode !== "create") return;
+    setGrillState((prev) =>
+      prev
+        ? {
+            ...prev,
+            entries: [...prev.entries, { id: crypto.randomUUID(), role: "user", text: intent }],
+          }
+        : prev,
+    );
+    void runGrillCreateStart(current.date, intent);
+  }
+
+  async function runGrillReviseStart(
+    grillDate: string,
+    taskId: string,
+    task: TaskRecord,
+    restart: boolean,
+  ) {
+    const runId = ++grillRunRef.current;
+    setGrillState((prev) => (prev ? { ...prev, phase: "waiting", error: undefined } : prev));
+    try {
+      const { ok, status, body } = await grillRequest(`/api/studio/day/${grillDate}/grill`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "revise", taskId, ...(restart ? { restart: true } : {}) }),
+      });
+      if (grillRunRef.current !== runId) return;
+      if (!ok) {
+        applyGrillFailure(status, (body.error as string) || `HTTP ${status}`, "start");
+        return;
+      }
+      const active = grillTurnToActive(body.turn as GrillTurn, body.computedWarnings as string[]);
+      setGrillState((prev) =>
+        prev
+          ? {
+              ...prev,
+              grillId: body.grillId as string,
+              taskSnapshot: task,
+              active,
+              phase: active.kind === "proposal" ? "proposal" : "chatting",
+              error: undefined,
+            }
+          : prev,
+      );
+    } catch (error) {
+      if (grillRunRef.current !== runId) return;
+      applyGrillFailure(
+        0,
+        error instanceof Error ? error.message : "Could not start the grill interview.",
+        "start",
+      );
+    }
+  }
+
+  function grillReviseTask(task: TaskRecord, options?: { restart?: boolean }) {
+    if (!date) return;
+    const existing = grillState;
+    if (
+      existing?.mode === "revise" &&
+      existing.taskId === task.id &&
+      existing.phase !== "error" &&
+      existing.phase !== "lost" &&
+      !options?.restart
+    ) {
+      return;
+    }
+    const sameTaskExisting = existing?.mode === "revise" && existing.taskId === task.id;
+    discardGrill();
+    setGrillState({
+      mode: "revise",
+      date,
+      taskId: task.id,
+      taskSnapshot: task,
+      entries: [],
+      phase: "waiting",
+    });
+    void runGrillReviseStart(date, task.id, task, Boolean(options?.restart) || sameTaskExisting);
+  }
+
+  async function runGrillAnswer(grillDate: string, grillId: string, payload: GrillAnswerPayload) {
+    const runId = ++grillRunRef.current;
+    setGrillState((prev) =>
+      prev ? { ...prev, phase: "waiting", error: undefined, lastAnswer: payload } : prev,
+    );
+    try {
+      const { ok, status, body } = await grillRequest(
+        `/api/studio/day/${grillDate}/grill/${grillId}/answer`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+      if (grillRunRef.current !== runId) return;
+      if (!ok) {
+        applyGrillFailure(status, (body.error as string) || `HTTP ${status}`, "answer");
+        return;
+      }
+      const active = grillTurnToActive(body.turn as GrillTurn, body.computedWarnings as string[]);
+      setGrillState((prev) =>
+        prev
+          ? {
+              ...prev,
+              active,
+              phase: active.kind === "proposal" ? "proposal" : "chatting",
+              error: undefined,
+            }
+          : prev,
+      );
+    } catch (error) {
+      if (grillRunRef.current !== runId) return;
+      applyGrillFailure(
+        0,
+        error instanceof Error ? error.message : "The grill interview hit an error.",
+        "answer",
+      );
+    }
+  }
+
+  function sendGrillMessage(payload: GrillAnswerPayload) {
+    const current = grillState;
+    if (!current?.grillId) return;
+    if (current.phase !== "chatting" && current.phase !== "proposal") return;
+    // Collapse the turn being answered + the user's message into history, then clear active.
+    setGrillState((prev) => {
+      if (!prev) return prev;
+      const additions: GrillTranscriptEntry[] = [];
+      if (prev.active?.kind === "questions") {
+        additions.push({
+          id: crypto.randomUUID(),
+          role: "questions",
+          note: prev.active.note,
+          questions: prev.active.questions,
+        });
+      } else if (prev.active?.kind === "proposal") {
+        additions.push({
+          id: crypto.randomUUID(),
+          role: "proposal",
+          proposal: prev.active.proposal,
+          warnings: prev.active.warnings,
+        });
+      }
+      additions.push({
+        id: crypto.randomUUID(),
+        role: "user",
+        text: "draftNow" in payload ? "Good enough, draft it." : payload.message,
+      });
+      return { ...prev, entries: [...prev.entries, ...additions], active: undefined };
+    });
+    void runGrillAnswer(current.date, current.grillId, payload);
+  }
+
+  async function applyGrillProposal(attempt = 0, acknowledge = false) {
+    const current = grillState;
+    if (!current?.grillId || current.active?.kind !== "proposal") return;
+    const { date: grillDate, grillId } = current;
+    const proposal = current.active.proposal;
+    const acknowledgeTaskUpdatedAt =
+      acknowledge && current.freshTask
+        ? current.freshTask.updatedAt
+        : current.acknowledgedTaskUpdatedAt;
+    const runId = ++grillRunRef.current;
+    setGrillState((prev) =>
+      prev
+        ? {
+            ...prev,
+            phase: "applying",
+            error: undefined,
+            acknowledgedTaskUpdatedAt: acknowledgeTaskUpdatedAt,
+          }
+        : prev,
+    );
+    // Dirty-flush before apply (spec 7.2): persist unsaved board edits first, else mid-chat edits
+    // are clobbered or the debounced autosave 409s after apply. Only on the first attempt: the
+    // day-conflict retry (attempt > 0) already flushed, and re-flushing a now-stale baseUpdatedAt
+    // would surface a bogus save error instead of a clean apply retry.
+    try {
+      if (attempt === 0 && dirty) await saveDayNow(day);
+    } catch (error) {
+      if (grillRunRef.current !== runId) return;
+      applyGrillFailure(
+        0,
+        error instanceof Error ? error.message : "Could not save local edits before applying.",
+        "apply",
+      );
+      return;
+    }
+    if (grillRunRef.current !== runId) return;
+    try {
+      const { ok, status, body } = await grillRequest(
+        `/api/studio/day/${grillDate}/grill/${grillId}/apply`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            proposal,
+            ...(acknowledgeTaskUpdatedAt ? { acknowledgeTaskUpdatedAt } : {}),
+          }),
+        },
+      );
+      if (grillRunRef.current !== runId) return;
+      if (!ok) {
+        const code = body.code as string | undefined;
+        if (status === 409 && code === "task-changed" && body.freshTask) {
+          setGrillState((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  phase: "task-changed",
+                  freshTask: body.freshTask as TaskRecord,
+                  error: undefined,
+                  // a new conflict invalidates any prior acknowledgement
+                  acknowledgedTaskUpdatedAt: undefined,
+                }
+              : prev,
+          );
+          return;
+        }
+        if (status === 409 && code === "proposal-stale") {
+          await resyncGrillProposal(grillDate, grillId, runId);
+          return;
+        }
+        if (status === 409 && code === "day-conflict" && attempt === 0) {
+          // Auto-retry apply exactly once; the apply route re-reads the day on each call.
+          await applyGrillProposal(1, acknowledge);
+          return;
+        }
+        applyGrillFailure(status, (body.error as string) || `HTTP ${status}`, "apply");
+        return;
+      }
+      const nextDay = body.day as DayPlan | undefined;
+      if (nextDay) {
+        baseUpdatedAtRef.current = nextDay.updatedAt;
+        setDay(nextDay);
+        setDirty(false);
+        setSaveState("saved");
+      }
+      // done (spec 7.2): drawer closes, board refreshes from the returned day.
+      setGrillState(undefined);
+    } catch (error) {
+      if (grillRunRef.current !== runId) return;
+      applyGrillFailure(
+        0,
+        error instanceof Error ? error.message : "Applying the proposal failed.",
+        "apply",
+      );
+    }
+  }
+
+  // proposal-stale 409: the echoed proposal is not the session's current one. Re-sync via GET and
+  // REPLACE the active proposal card (never append) so the user reviews the live proposal.
+  async function resyncGrillProposal(grillDate: string, grillId: string, runId: number) {
+    try {
+      const { ok, status, body } = await grillRequest(
+        `/api/studio/day/${grillDate}/grill/${grillId}`,
+        { method: "GET" },
+      );
+      if (grillRunRef.current !== runId) return;
+      if (!ok) {
+        applyGrillFailure(status, (body.error as string) || `HTTP ${status}`, "apply");
+        return;
+      }
+      const turn = body.turn as GrillTurn | undefined;
+      if (!turn) {
+        applyGrillFailure(0, "The grill session is no longer on a proposal.", "apply");
+        return;
+      }
+      const active = grillTurnToActive(turn, body.computedWarnings as string[]);
+      setGrillState((prev) =>
+        prev
+          ? {
+              ...prev,
+              active,
+              phase: active.kind === "proposal" ? "proposal" : "chatting",
+              error: undefined,
+            }
+          : prev,
+      );
+    } catch (error) {
+      if (grillRunRef.current !== runId) return;
+      applyGrillFailure(
+        0,
+        error instanceof Error ? error.message : "Could not re-sync the grill session.",
+        "apply",
+      );
+    }
+  }
+
+  function retryGrill() {
+    const current = grillState;
+    if (!current) return;
+    if (current.failedStage === "start") {
+      if (current.mode === "create" && current.intent) {
+        void runGrillCreateStart(current.date, current.intent);
+      } else if (current.mode === "revise" && current.taskId && current.taskSnapshot) {
+        void runGrillReviseStart(current.date, current.taskId, current.taskSnapshot, true);
+      }
+      return;
+    }
+    if (current.failedStage === "answer" && current.lastAnswer && current.grillId) {
+      void runGrillAnswer(current.date, current.grillId, current.lastAnswer);
+      return;
+    }
+    if (current.failedStage === "apply") {
+      void applyGrillProposal(0);
+    }
+  }
+
+  function startOverGrill() {
+    const current = grillState;
+    if (!current) return;
+    if (current.mode === "create") {
+      setGrillState({ mode: "create", date: current.date, entries: [], phase: "intent" });
+    } else if (current.taskId && current.taskSnapshot) {
+      grillReviseTask(current.taskSnapshot, { restart: true });
+    }
+  }
+
+  async function copyActiveGrillPrompt() {
+    const current = grillState;
+    if (!current) return;
+    if (current.mode === "revise" && current.taskSnapshot) {
+      await copyGrillPrompt(current.taskSnapshot);
+    } else if (current.mode === "create") {
+      await navigator.clipboard.writeText(buildCreateGrillPromptText(current.intent ?? ""));
+    }
+  }
+
   function savePromptSettings(nextTemplate: string) {
     const templateWarnings = validatePromptTemplate(nextTemplate);
     if (
@@ -1070,32 +1529,35 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
     setCaptureTouched(false);
   }
 
-  function addTask() {
+  function addTask(options?: { select?: boolean }): { taskId: string; day: DayPlan } | undefined {
     const missingFields = validateTaskDraft(taskDraft);
     setCaptureTouched(true);
     if (!day || missingFields.length > 0) {
-      return;
+      return undefined;
     }
     const now = new Date().toISOString();
     const sourceRefs = sourceRefsFromDraft(taskDraft, "Manual capture");
     const ticketFields = taskTicketFieldsFromDraft(taskDraft);
+    // Single constructor (spec 6.2): buildNewTask owns the structural defaults (status, timestamps,
+    // empty collections, unscheduled) shared with the grill create-apply path. Capture-specific
+    // values (the readable slug id, suggested agent, source refs) are layered on top so the task
+    // matches the previous manual-capture output, then readiness is computed LAST on the final task.
     const baseTask: TaskRecord = {
+      ...buildNewTask({
+        title: taskDraft.title,
+        kind: taskDraft.kind,
+        estimateMinutes: parseEstimateDraft(taskDraft.estimateMinutes, 30),
+        workDepth: taskDraft.workDepth,
+        ticketFields,
+      }),
       id: createUniqueTaskId(day.date, taskDraft.title, day.tasks),
-      title: taskDraft.title.trim(),
       agentName:
         suggestAgentName({
           title: taskDraft.title.trim(),
           ticketFields,
           sourceRefs,
         }) || undefined,
-      status: "todo",
-      kind: taskDraft.kind,
-      estimateMinutes: parseEstimateDraft(taskDraft.estimateMinutes, 30),
-      workDepth: taskDraft.workDepth,
-      agentReadiness: "warning",
-      readinessWarnings: [],
       sourceRefs,
-      ticketFields,
       createdAt: now,
       updatedAt: now,
     };
@@ -1104,10 +1566,12 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
       agentReadiness: getTaskReadiness(baseTask),
       readinessWarnings: getPromptWarnings(baseTask),
     };
-    commit({ ...day, tasks: [task, ...day.tasks] });
+    const nextDay: DayPlan = { ...day, tasks: [task, ...day.tasks], updatedAt: now };
+    commit(nextDay);
     setTaskDraft(createEmptyTaskDraft());
     closeCapture();
-    setSelectedTaskId(task.id);
+    if (options?.select ?? true) setSelectedTaskId(task.id);
+    return { taskId: task.id, day: nextDay };
   }
 
   function addTracker() {
@@ -1368,6 +1832,8 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
                 setBatchDeployExcluded(new Set());
                 setBatchDeployOpen(true);
               }}
+              grillEnabled={grillEnabled}
+              onGrillNew={grillNewTicket}
               paletteMode={paletteMode}
               saveState={saveState}
               setActiveTab={setActiveTab}
@@ -1419,7 +1885,13 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
                       {STATUS_ORDER.map((status) => (
                         <TaskLane
                           exitingTaskId={exitingTaskId}
+                          grillEnabled={grillEnabled}
+                          grillingTaskId={
+                            grillState?.mode === "revise" ? grillState.taskId : undefined
+                          }
                           key={status}
+                          onCopyGrillPrompt={copyGrillPrompt}
+                          onGrillTask={grillReviseTask}
                           onRequestDelete={setDeleteCandidateId}
                           onSelect={setSelectedTaskId}
                           status={status}
@@ -1476,10 +1948,52 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
                     saveState === "saving" ? "Save is in progress." : directDeployWarning
                   }
                   onDeploy={(model) => deployTask(selectedTask.id, model)}
+                  grillEnabled={grillEnabled}
+                  grillInProgress={
+                    grillState?.mode === "revise" && grillState.taskId === selectedTask.id
+                  }
+                  onGrill={(task) => {
+                    setSelectedTaskId(undefined);
+                    grillReviseTask(task);
+                  }}
                   titleId={modalTitleId}
                   task={selectedTask}
                   updateTask={(update) => updateTask(selectedTask.id, update)}
                   workDate={day.date}
+                />
+              ) : null}
+            </AnimatePresence>
+
+            <AnimatePresence>
+              {grillState ? (
+                <GrillChatDrawer
+                  active={grillState.active}
+                  busy={grillState.phase === "waiting" || grillState.phase === "applying"}
+                  diffBaseline={
+                    grillState.mode === "revise"
+                      ? (grillState.freshTask ?? grillState.taskSnapshot)
+                      : undefined
+                  }
+                  entries={grillState.entries}
+                  error={grillState.error}
+                  freshTask={grillState.freshTask}
+                  headerTitle={
+                    grillState.mode === "revise"
+                      ? (grillState.taskSnapshot?.title ?? "Revise ticket")
+                      : "New ticket"
+                  }
+                  key={`${grillState.mode}:${grillState.taskId ?? "new"}`}
+                  mode={grillState.mode}
+                  onApply={() => void applyGrillProposal(0, false)}
+                  onCopyPrompt={copyActiveGrillPrompt}
+                  onDiscard={discardGrill}
+                  onDraftNow={() => sendGrillMessage({ draftNow: true })}
+                  onReconfirmTaskChanged={() => void applyGrillProposal(0, true)}
+                  onRetry={retryGrill}
+                  onSendIntent={sendGrillIntent}
+                  onSendMessage={(text) => sendGrillMessage({ message: text })}
+                  onStartOver={startOverGrill}
+                  phase={grillState.phase}
                 />
               ) : null}
             </AnimatePresence>
@@ -1630,6 +2144,90 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
   );
 }
 
+// New-ticket affordance (spec 7.1): a two-option chooser. "Grill it" opens the chat drawer in
+// create mode; "Fill in manually" opens the existing capture modal. Only rendered when grilling
+// is enabled; otherwise the header shows the plain Capture button.
+function NewTicketChooser({
+  onGrillNew,
+  onManualNew,
+}: {
+  onGrillNew: () => void;
+  onManualNew: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<CSSProperties | undefined>();
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const portalTarget =
+    typeof document === "undefined"
+      ? null
+      : (document.querySelector<HTMLElement>(".studio-shell") ?? document.body);
+
+  useEffect(() => {
+    if (!open) return;
+    function updatePosition() {
+      setMenuPosition(deployMenuStyle(buttonRef.current));
+    }
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open]);
+
+  useMenuDismiss(open, () => setOpen(false), [buttonRef, menuRef]);
+
+  return (
+    <>
+      <button
+        aria-expanded={open}
+        className="appearance-trigger appearance-trigger-capture"
+        onClick={() =>
+          setOpen((current) => {
+            if (current) return false;
+            setMenuPosition(deployMenuStyle(buttonRef.current));
+            return true;
+          })
+        }
+        ref={buttonRef}
+        type="button"
+      >
+        <Plus className="h-4 w-4" />
+        Capture
+      </button>
+      {open && portalTarget
+        ? createPortal(
+            <div className="deploy-agent-menu" ref={menuRef} style={menuPosition}>
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onGrillNew();
+                }}
+                type="button"
+              >
+                <MessageCircleQuestion className="h-3.5 w-3.5" />
+                Grill it
+              </button>
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onManualNew();
+                }}
+                type="button"
+              >
+                <PencilLine className="h-3.5 w-3.5" />
+                Fill in manually
+              </button>
+            </div>,
+            portalTarget,
+          )
+        : null}
+    </>
+  );
+}
+
 function StudioHeader({
   activeTab,
   availableDays,
@@ -1638,6 +2236,8 @@ function StudioHeader({
   densityMode,
   date,
   day,
+  grillEnabled,
+  onGrillNew,
   onOpenBatchDeploy,
   paletteMode,
   saveState,
@@ -1655,6 +2255,8 @@ function StudioHeader({
   densityMode: DensityMode;
   date: string;
   day: DayPlan;
+  grillEnabled: boolean;
+  onGrillNew: () => void;
   onOpenBatchDeploy: () => void;
   paletteMode: PaletteMode;
   saveState: SaveState;
@@ -1681,14 +2283,18 @@ function StudioHeader({
 
       <div className="studio-header-actions">
         <StudioTabControl onChange={setActiveTab} value={activeTab} />
-        <button
-          className="appearance-trigger appearance-trigger-capture"
-          onClick={setCaptureOpen}
-          type="button"
-        >
-          <Plus className="h-4 w-4" />
-          Capture
-        </button>
+        {grillEnabled ? (
+          <NewTicketChooser onGrillNew={onGrillNew} onManualNew={setCaptureOpen} />
+        ) : (
+          <button
+            className="appearance-trigger appearance-trigger-capture"
+            onClick={setCaptureOpen}
+            type="button"
+          >
+            <Plus className="h-4 w-4" />
+            Capture
+          </button>
+        )}
         <button
           className="appearance-trigger appearance-trigger-prompt"
           onClick={() => setSettingsOpen(true)}
@@ -2071,9 +2677,12 @@ function AppearanceMenu({
   setPaletteMode: (palette: PaletteMode) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useMenuDismiss(open, () => setOpen(false), [menuRef]);
 
   return (
-    <div className="appearance-menu">
+    <div className="appearance-menu" ref={menuRef}>
       <button
         aria-expanded={open}
         className="appearance-trigger"
@@ -2579,6 +3188,10 @@ function CaptureModalFooter({
 
 const TaskLane = memo(function TaskLane({
   exitingTaskId,
+  grillEnabled,
+  grillingTaskId,
+  onCopyGrillPrompt,
+  onGrillTask,
   onRequestDelete,
   status,
   tasks,
@@ -2586,6 +3199,10 @@ const TaskLane = memo(function TaskLane({
   workDate,
 }: {
   exitingTaskId?: string;
+  grillEnabled?: boolean;
+  grillingTaskId?: string;
+  onCopyGrillPrompt?: (task: TaskRecord) => void;
+  onGrillTask?: (task: TaskRecord) => void;
   onRequestDelete: (id: string) => void;
   status: TaskStatus;
   tasks: TaskRecord[];
@@ -2604,8 +3221,12 @@ const TaskLane = memo(function TaskLane({
         <AnimatePresence mode="popLayout">
           {tasks.map((task) => (
             <DraggableTaskCard
+              grillEnabled={grillEnabled}
+              grillingTaskId={grillingTaskId}
               isExiting={task.id === exitingTaskId}
               key={task.id}
+              onCopyGrillPrompt={onCopyGrillPrompt}
+              onGrillTask={onGrillTask}
               onRequestDelete={onRequestDelete}
               onSelect={onSelect}
               task={task}
@@ -2619,13 +3240,21 @@ const TaskLane = memo(function TaskLane({
 });
 
 const DraggableTaskCard = memo(function DraggableTaskCard({
+  grillEnabled,
+  grillingTaskId,
   isExiting,
+  onCopyGrillPrompt,
+  onGrillTask,
   onRequestDelete,
   task,
   onSelect,
   workDate,
 }: {
+  grillEnabled?: boolean;
+  grillingTaskId?: string;
   isExiting?: boolean;
+  onCopyGrillPrompt?: (task: TaskRecord) => void;
+  onGrillTask?: (task: TaskRecord) => void;
   onRequestDelete: (id: string) => void;
   task: TaskRecord;
   onSelect: (id: string) => void;
@@ -2653,16 +3282,32 @@ const DraggableTaskCard = memo(function DraggableTaskCard({
       {...listeners}
       {...attributes}
     >
-      <TaskCardContent onRequestDelete={onRequestDelete} task={task} workDate={workDate} />
+      <TaskCardContent
+        grillEnabled={grillEnabled}
+        grillInProgress={grillingTaskId === task.id}
+        onCopyGrillPrompt={onCopyGrillPrompt}
+        onGrillTask={onGrillTask}
+        onRequestDelete={onRequestDelete}
+        task={task}
+        workDate={workDate}
+      />
     </motion.article>
   );
 });
 
 function TaskCardContent({
+  grillEnabled,
+  grillInProgress,
+  onCopyGrillPrompt,
+  onGrillTask,
   onRequestDelete,
   task,
   workDate,
 }: {
+  grillEnabled?: boolean;
+  grillInProgress?: boolean;
+  onCopyGrillPrompt?: (task: TaskRecord) => void;
+  onGrillTask?: (task: TaskRecord) => void;
   onRequestDelete?: (id: string) => void;
   task: TaskRecord;
   workDate: string;
@@ -2689,6 +3334,15 @@ function TaskCardContent({
         <div className="task-card-chip-row">
           <TaskSourceChip task={task} />
           <TaskWarningChips compact carryOverDays={carryOverDays} minutes={task.estimateMinutes} />
+          {onGrillTask && onCopyGrillPrompt ? (
+            <TaskGrillMenu
+              grillEnabled={Boolean(grillEnabled)}
+              grillInProgress={Boolean(grillInProgress)}
+              onCopyPrompt={onCopyGrillPrompt}
+              onGrill={onGrillTask}
+              task={task}
+            />
+          ) : null}
         </div>
         {onRequestDelete ? (
           <TaskDeleteButton
@@ -2924,6 +3578,55 @@ function deployMenuStyle(anchor: HTMLElement | null): CSSProperties {
   };
 }
 
+// Shared outside-dismiss behavior for dropdown/menu components. Closes on any pointerdown
+// outside the given refs (trigger + panel) and on Escape. Both listeners are registered on
+// `document` with `capture: true` so they run ahead of triggers that stopPropagation() on
+// pointer events (e.g. TaskGrillMenu's button) and ahead of bubble-phase Escape handlers
+// owned by an ancestor modal (calling stopPropagation() lets the menu consume the keypress
+// without also closing that modal).
+function useMenuDismiss(
+  open: boolean,
+  close: () => void,
+  refs: ReadonlyArray<RefObject<HTMLElement | null>>,
+) {
+  const closeRef = useRef(close);
+  const refsRef = useRef(refs);
+
+  useEffect(() => {
+    closeRef.current = close;
+  }, [close]);
+
+  useEffect(() => {
+    refsRef.current = refs;
+  });
+
+  useEffect(() => {
+    if (!open) return;
+
+    function isInsideMenu(target: EventTarget | null) {
+      return target instanceof Node && refsRef.current.some((ref) => ref.current?.contains(target));
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (isInsideMenu(event.target)) return;
+      closeRef.current();
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      closeRef.current();
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [open]);
+}
+
 function TaskDeleteButton({
   className,
   label,
@@ -2952,6 +3655,111 @@ function TaskDeleteButton({
     >
       <Trash2 className="h-3.5 w-3.5" />
     </button>
+  );
+}
+
+function TaskGrillMenu({
+  grillEnabled,
+  grillInProgress,
+  onCopyPrompt,
+  onGrill,
+  task,
+}: {
+  grillEnabled: boolean;
+  grillInProgress: boolean;
+  onCopyPrompt: (task: TaskRecord) => void;
+  onGrill: (task: TaskRecord) => void;
+  task: TaskRecord;
+}) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<CSSProperties | undefined>();
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const portalTarget =
+    typeof document === "undefined"
+      ? null
+      : (document.querySelector<HTMLElement>(".studio-shell") ?? document.body);
+
+  useEffect(() => {
+    if (!open) return;
+    function updatePosition() {
+      setMenuPosition(deployMenuStyle(buttonRef.current));
+    }
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open]);
+
+  useMenuDismiss(open, () => setOpen(false), [buttonRef, menuRef]);
+
+  function handleCopy() {
+    onCopyPrompt(task);
+    setCopied(true);
+    window.setTimeout(() => {
+      setCopied(false);
+      setOpen(false);
+    }, 900);
+  }
+
+  return (
+    <>
+      <button
+        aria-expanded={open}
+        aria-label={`More actions for ${task.title}`}
+        className="task-delete-button"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen((current) => {
+            if (current) return false;
+            setMenuPosition(deployMenuStyle(buttonRef.current));
+            return true;
+          });
+        }}
+        onPointerDown={(event) => event.stopPropagation()}
+        ref={buttonRef}
+        title="More actions"
+        type="button"
+      >
+        <MoreVertical className="h-3.5 w-3.5" />
+      </button>
+      {open && portalTarget
+        ? createPortal(
+            <div className="deploy-agent-menu" ref={menuRef} style={menuPosition}>
+              {grillEnabled ? (
+                <button
+                  disabled={grillInProgress}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setOpen(false);
+                    onGrill(task);
+                  }}
+                  type="button"
+                >
+                  <MessageCircleQuestion className="h-3.5 w-3.5" />
+                  {grillInProgress ? "Re-grilling..." : "Re-grill"}
+                </button>
+              ) : null}
+              <button
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleCopy();
+                }}
+                type="button"
+              >
+                <Clipboard className="h-3.5 w-3.5" />
+                {copied ? "Copied" : "Copy grill prompt"}
+              </button>
+            </div>,
+            portalTarget,
+          )
+        : null}
+    </>
   );
 }
 
@@ -4061,6 +4869,9 @@ function TaskModal({
   deployDisabled,
   deployDisabledReason,
   onDeploy,
+  grillEnabled,
+  grillInProgress,
+  onGrill,
   titleId,
   updateTask,
   workDate,
@@ -4072,6 +4883,9 @@ function TaskModal({
   deployDisabled: boolean;
   deployDisabledReason?: string;
   onDeploy: (model: AgentModel) => void;
+  grillEnabled?: boolean;
+  grillInProgress?: boolean;
+  onGrill?: (task: TaskRecord) => void;
   titleId: string | undefined;
   updateTask: (update: (task: TaskRecord) => TaskRecord) => void;
   workDate: string;
@@ -4080,6 +4894,7 @@ function TaskModal({
   const [deployMenuOpen, setDeployMenuOpen] = useState(false);
   const [deployMenuPosition, setDeployMenuPosition] = useState<CSSProperties | undefined>();
   const deployMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const deployMenuRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const modalRef = useRef<HTMLElement>(null);
   const onCloseRef = useRef(onClose);
@@ -4187,6 +5002,11 @@ function TaskModal({
       window.removeEventListener("scroll", updatePosition, true);
     };
   }, [deployMenuOpen]);
+
+  useMenuDismiss(deployMenuOpen, () => setDeployMenuOpen(false), [
+    deployMenuButtonRef,
+    deployMenuRef,
+  ]);
 
   useEffect(() => {
     const previouslyFocused =
@@ -4425,6 +5245,17 @@ function TaskModal({
               {copied ? <Check className="h-4 w-4" /> : <Clipboard className="h-4 w-4" />}
               {copied ? "Copied" : readiness === "incomplete" ? "Copy capture" : "Copy prompt"}
             </button>
+            {grillEnabled && onGrill ? (
+              <button
+                className="copy-prompt-button"
+                disabled={grillInProgress}
+                onClick={() => onGrill(task)}
+                type="button"
+              >
+                <MessageCircleQuestion className="h-4 w-4" />
+                {grillInProgress ? "Re-grilling..." : "Re-grill"}
+              </button>
+            ) : null}
             <div className="deploy-agent-control">
               <button
                 className="deploy-agent-main"
@@ -4454,7 +5285,11 @@ function TaskModal({
               {deployMenuOpen
                 ? deployMenuPortalTarget
                   ? createPortal(
-                      <div className="deploy-agent-menu" style={deployMenuPosition}>
+                      <div
+                        className="deploy-agent-menu"
+                        ref={deployMenuRef}
+                        style={deployMenuPosition}
+                      >
                         {AGENT_MODEL_OPTIONS.filter((option) => option.model !== "sonnet").map(
                           (option) => (
                             <button
@@ -4502,7 +5337,7 @@ function TaskModal({
               onChange={(event) =>
                 patch({ agentName: sanitizeAgentName(event.target.value) || undefined })
               }
-              placeholder="fix-login-timeout"
+              placeholder="fix-funded-supply"
               value={task.agentName || ""}
             />
             <span className="field-hint">
@@ -4823,6 +5658,58 @@ function DeployAgentStatus({
       </motion.div>
     </AnimatePresence>
   );
+}
+
+const GRILL_PROMPT_CONTRACT_SUMMARY = [
+  "You are helping me get a task ready for an autonomous coding agent.",
+  "Ask only what is needed to resolve: the exact outcome, the authoritative source,",
+  "scope and non-goals, what proves it is done, how to verify it, and a time estimate",
+  "(15, 30, 60, 90, or 120 minutes).",
+  "Ask 2 to 5 open ended questions as one numbered list. No suggested answers, no defaults.",
+  "Ask at most one follow up round, then produce the draft.",
+  "Resolve every field explicitly, including sources: write None when nothing applies.",
+  "Never leave a field blank or write Unknown. Never invent specifics I did not state.",
+].join(" ");
+
+function buildGrillPromptText(task: TaskRecord): string {
+  const fields = taskTicketFields(task);
+  const taskJson = JSON.stringify(
+    {
+      title: task.title,
+      kind: task.kind,
+      workDepth: task.workDepth,
+      estimateMinutes: task.estimateMinutes,
+      ticketFields: fields,
+      sourceRefs: task.sourceRefs,
+    },
+    null,
+    2,
+  );
+  return [
+    GRILL_PROMPT_CONTRACT_SUMMARY,
+    "",
+    "== TASK ==",
+    taskJson,
+    "",
+    "Interview me with one concise numbered list of open questions, then output the draft fields as JSON.",
+  ].join("\n");
+}
+
+async function copyGrillPrompt(task: TaskRecord) {
+  await navigator.clipboard.writeText(buildGrillPromptText(task));
+}
+
+// Create-mode copy-prompt fallback (spec 7.2): mirrors buildGrillPromptText but seeds the interview
+// from the typed intent, since a create session has no task yet.
+function buildCreateGrillPromptText(intent: string): string {
+  return [
+    GRILL_PROMPT_CONTRACT_SUMMARY,
+    "",
+    "== INTENT ==",
+    intent.trim() || "(no intent captured yet)",
+    "",
+    "Interview me with one concise numbered list of open questions, then output the draft fields as JSON.",
+  ].join("\n");
 }
 
 function DeleteTaskConfirm({
@@ -5306,10 +6193,7 @@ function useCurrentMinute(date: string, timezone: string) {
   return minute;
 }
 
-function buildCalendarRange(
-  day: DayPlan,
-  meetings: CalendarFile["meetings"] = [],
-): CalendarRange {
+function buildCalendarRange(day: DayPlan, meetings: CalendarFile["meetings"] = []): CalendarRange {
   const slotMinutes = normalizeEstimateMinutes(day.settings.slotMinutes || WORKDAY_SLOT_MINUTES);
   const baseStartMinute = Math.max(0, Math.min(23 * 60, day.settings.startHour * 60));
   const baseEndMinute = Math.max(

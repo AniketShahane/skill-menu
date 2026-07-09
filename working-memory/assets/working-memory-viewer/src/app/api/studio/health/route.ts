@@ -10,6 +10,7 @@ import {
   getClaudeBin,
   getWorkingMemoryTimeZone,
   isDirectAgentDeployEnabled,
+  isGrillEnabled,
 } from "@/lib/runtime-config";
 
 export const runtime = "nodejs";
@@ -46,6 +47,7 @@ export async function GET() {
       agentCwd: getAgentCwd(),
       claudeBin: getClaudeBin(),
       directDeployEnabled: isDirectAgentDeployEnabled(),
+      grillEnabled: isGrillEnabled(),
     },
     files: {
       archive,

@@ -291,6 +291,8 @@ Score each classified item on:
 - delegation readiness,
 - work depth.
 
+Canonical question set and field rules: [assets/working-memory-viewer/content/grilling-contract.md](../assets/working-memory-viewer/content/grilling-contract.md).
+
 Core grilling set for each selected active task:
 
 1. What exact outcome should exist when this is done?

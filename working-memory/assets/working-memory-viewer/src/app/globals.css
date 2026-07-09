@@ -3319,6 +3319,9 @@ button {
 }
 
 .deploy-agent-menu button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   border: 0;
   border-radius: 6px;
   background: transparent;
