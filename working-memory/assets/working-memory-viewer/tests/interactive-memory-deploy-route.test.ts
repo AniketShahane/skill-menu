@@ -44,7 +44,7 @@ describe("working memory deploy route", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
-      error: "Invalid agent model. Use haiku, sonnet, or opus.",
+      error: "Invalid agent model. Use haiku, sonnet, opus, or fable.",
     });
     expect(launchMock).not.toHaveBeenCalled();
   });

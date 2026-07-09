@@ -6,7 +6,7 @@ import { getAgentCwd, getClaudeBin } from "@/lib/runtime-config";
 import { resolveTaskAgentName } from "./agent-names";
 import type { AgentModel, AgentRun, TaskRecord } from "./types";
 
-export const AGENT_MODELS: AgentModel[] = ["haiku", "sonnet", "opus"];
+export const AGENT_MODELS: AgentModel[] = ["haiku", "sonnet", "opus", "fable"];
 
 type SpawnLike = typeof spawn;
 

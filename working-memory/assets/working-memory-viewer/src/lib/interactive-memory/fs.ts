@@ -43,7 +43,7 @@ const TASK_STATUSES: TaskStatus[] = ["todo", "in_progress", "review", "done"];
 const TASK_KINDS: TaskKind[] = ["focus", "task", "quick", "comms", "personal", "ad_hoc"];
 const TRACKER_STATUSES: TrackerStatus[] = ["active", "waiting", "blocked", "done", "dropped"];
 const WORK_DEPTHS: WorkDepth[] = ["deep", "shallow"];
-const AGENT_MODELS: AgentModel[] = ["haiku", "sonnet", "opus"];
+const AGENT_MODELS: AgentModel[] = ["haiku", "sonnet", "opus", "fable"];
 const AGENT_RUN_STATUSES: AgentRun["status"][] = ["launched"];
 const LEGACY_TEXT_SCHEMA_MAX_VERSION = 5;
 

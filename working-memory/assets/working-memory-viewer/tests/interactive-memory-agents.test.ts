@@ -26,6 +26,7 @@ describe("interactive memory Claude agent helpers", () => {
     expect(parseAgentModel("haiku")).toBe("haiku");
     expect(parseAgentModel("sonnet")).toBe("sonnet");
     expect(parseAgentModel("opus")).toBe("opus");
+    expect(parseAgentModel("fable")).toBe("fable");
     expect(parseAgentModel("gpt-5")).toBeUndefined();
     expect(parseAgentModel(undefined)).toBeUndefined();
   });

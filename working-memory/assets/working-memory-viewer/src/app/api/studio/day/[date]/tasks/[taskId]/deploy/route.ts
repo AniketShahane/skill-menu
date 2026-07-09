@@ -39,7 +39,7 @@ export async function POST(request: Request, context: RouteContext) {
     const model = parseAgentModel(payload.model);
     if (!model) {
       return NextResponse.json(
-        { error: "Invalid agent model. Use haiku, sonnet, or opus." },
+        { error: "Invalid agent model. Use haiku, sonnet, opus, or fable." },
         { status: 400 },
       );
     }

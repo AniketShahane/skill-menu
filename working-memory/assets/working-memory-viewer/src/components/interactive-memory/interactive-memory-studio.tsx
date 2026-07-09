@@ -132,6 +132,7 @@ const TASK_KIND_META: Record<
 const AGENT_MODEL_OPTIONS: Array<{ model: AgentModel; label: string }> = [
   { model: "sonnet", label: "Sonnet" },
   { model: "opus", label: "Opus" },
+  { model: "fable", label: "Fable" },
   { model: "haiku", label: "Haiku" },
 ];
 type DisplaySourceKind = Extract<SourceKind, "slack" | "jira" | "gmail" | "manual">;

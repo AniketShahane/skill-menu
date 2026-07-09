@@ -9,7 +9,7 @@ export type SourceKind = "jira" | "slack" | "gmail" | "calendar" | "meeting" | "
 export type TrackerStatus = "active" | "waiting" | "blocked" | "done" | "dropped";
 export type WorkDepth = "deep" | "shallow";
 export type AgentReadiness = "ready" | "warning" | "incomplete";
-export type AgentModel = "haiku" | "sonnet" | "opus";
+export type AgentModel = "haiku" | "sonnet" | "opus" | "fable";
 
 export type SourceRef = {
   kind: SourceKind;
