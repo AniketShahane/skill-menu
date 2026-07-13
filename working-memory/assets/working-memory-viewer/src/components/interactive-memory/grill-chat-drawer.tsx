@@ -119,6 +119,7 @@ export function GrillChatDrawer({
   active,
   diffBaseline,
   freshTask,
+  fromQueue = false,
   error,
   busy,
   onSendIntent,
@@ -138,6 +139,7 @@ export function GrillChatDrawer({
   active?: GrillActiveTurn;
   diffBaseline?: TaskRecord;
   freshTask?: TaskRecord;
+  fromQueue?: boolean;
   error?: GrillErrorInfo;
   busy: boolean;
   onSendIntent: (intent: string) => void;
@@ -188,7 +190,12 @@ export function GrillChatDrawer({
     setComposer("");
   }
 
-  const kicker = mode === "create" ? "Grill · new ticket" : "Re-grill · existing ticket";
+  const kicker =
+    mode === "create"
+      ? fromQueue
+        ? "Grill · from queue"
+        : "Grill · new ticket"
+      : "Re-grill · existing ticket";
   const showComposer = phase === "chatting" || phase === "proposal" || phase === "applying";
   const showProposalCard =
     active?.kind === "proposal" &&

@@ -203,6 +203,18 @@ Trackers are for other people's work. Do not put them in the task tables unless 
 
 Aging items (starred 3+ days, old Slack, unanswered thread) get ⚠️ in the Deferral or Suggested Tier cell.
 
+### Queue (from continuous monitoring) ({count})
+
+Read the rolling sweep queue: `GET /api/studio/queue`. Surface items whose `status` is `queued` as pre-harvested candidates gathered by the between-mornings sweeps (see [sweep-flow.md](sweep-flow.md)). These are inputs to planning, not tasks: the user decides what enters the plan by grilling a queued item (Step 5, or the in-app Grill entry point). Never auto-create a task from a queued item.
+
+| Item                       | Source(s)                    | Notes                                        |
+| -------------------------- | ---------------------------- | -------------------------------------------- |
+| {short candidate title}    | Slack / Gmail / Jira / Meeting | {possible match: <task> / dismissed before <date>} |
+
+A queued item may overlap a live source-scan candidate or an existing task; it can carry a "possible match" chip. Show it, do not double-count, and do not silently drop it. Grilling is the only path that turns a queued item into a task; the sweep never did.
+
+If the studio or `GET /api/studio/queue` is unreachable, skip this subsection silently. The queue is an optional layer; carry-forward and the live source scan still work without it.
+
 **How do you want to organize today?**
 
 - Classify: `"focus: X, tasks: Y Z, quick: rest"`
@@ -450,6 +462,25 @@ Write these scheduledStart/scheduledEnd values into the webapp archive? (or adju
 ```
 
 If the user approves, continue to Step 7. If the user adjusts, revise the schedule once, then proceed unless the user asks for another pass.
+
+---
+
+## Step 6.5: Compute Sweep Times + Refresh Scheduled Sweeps (gated)
+
+The continuous-monitoring queue runs two calendar-aware sweeps a day between good mornings (see [sweep-flow.md](sweep-flow.md)). The morning flow owns computing today's two sweep times from the calendar already fetched in Step 2. Refreshing the actual scheduled jobs is gated: it happens only when sweep scheduling has been activated per the ACTIVATION CHECKLIST in [../SKILL.md](../SKILL.md). Until then, compute and surface the times but touch no scheduled job.
+
+### Compute the two times
+
+- Base times: 12:00 and 16:00 local in the resolved `timezone`.
+- Meeting-block deferral: if a busy meeting is in progress at a base time, defer that sweep to the END of the overlapping meeting block. A block is a chain of back-to-back busy meetings with no real gap covering the base time; defer to the end of the whole chain, not just the first meeting.
+- Use the same busy definition as Step 6: a meeting counts only when it is not cancelled, not `responseStatus: "declined"`, not `transparency: "transparent"`, and not an all-day/free informational event.
+- If no busy meeting overlaps a base time, use the plain 12:00 / 16:00.
+- These two times are today's sweep schedule. When no morning flow runs on a given day, the sweeps fall back to plain 12:00 / 16:00.
+
+### Refresh scheduled jobs (only behind the activation gate)
+
+- If sweep scheduling is NOT activated per the SKILL.md ACTIVATION CHECKLIST, skip this silently. Do not create, delete, or edit any scheduled job. This is the v1 default: sweeps run manually by invoking [sweep-flow.md](sweep-flow.md) in a session.
+- If it IS activated: delete today's stale sweep jobs, then create two fresh scheduled jobs at the computed times, each running the headless routine in [sweep-flow.md](sweep-flow.md) with `lastSweepKind: "scheduled"`. Refresh with delete-then-create so re-running the morning flow does not stack duplicate jobs.
 
 ---
 

@@ -355,6 +355,7 @@ export type GrillSession = {
   mode: GrillMode;
   taskId?: string; // revise only
   taskUpdatedAtAtStart?: string; // revise only
+  queueItemId?: string; // set when the grill originated from a monitoring-queue candidate
   claudeSessionId?: string;
   lastProposal?: GrillProposal;
   lastTurn?: GrillTurn; // most recent turn of any kind, for GET re-sync

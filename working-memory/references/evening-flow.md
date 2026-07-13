@@ -185,6 +185,8 @@ Write the evening summary into today's `day.json` using the app's summary/day-no
 
 ### Shutdown signal
 
+Read the continuous-monitoring queue count before closing: `GET /api/studio/queue`, count items whose `status` is `queued`. This is report-only. The evening flow never grills, dismisses, or otherwise triages a queue item; un-grilled items roll over day to day until the user acts on them. If the studio or the queue endpoint is unreachable, omit the rollover line silently.
+
 Close with a brief message: this is the ritual closure:
 
 ```
@@ -194,6 +196,9 @@ Day closed. {done} of {total} complete.
 Deep work done: {focus item summary}
 
 Carrying forward: {count} items ({in-progress count} in-progress, {deferred count} deferred{, ⚠️ count at 5+ days if any})
+
+{If N queued items > 0:}
+Queue: {N} items still un-triaged, rolling over.
 
 Your brain is off the clock. Anything not captured here waits until morning.
 ```

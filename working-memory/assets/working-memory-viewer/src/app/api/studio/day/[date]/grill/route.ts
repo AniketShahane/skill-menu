@@ -12,12 +12,14 @@ import {
 } from "@/lib/interactive-memory/grill";
 import {
   assertGrillRouteAllowed,
+  buildQueueGrillIntent,
   computeProposalWarnings,
   deleteGrillSession,
   findLiveGrillSessionForTask,
   grillErrorResponse,
   recordTurn,
 } from "@/lib/interactive-memory/grill-routes";
+import { readQueue } from "@/lib/interactive-memory/queue-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +33,7 @@ type StartPayload = {
   intent?: unknown;
   taskId?: unknown;
   restart?: unknown;
+  queueItemId?: unknown;
 };
 
 const REVISE_KICKOFF =
@@ -46,7 +49,32 @@ export async function POST(request: Request, context: RouteContext) {
     const payload = (await request.json().catch(() => ({}))) as StartPayload;
 
     if (payload.mode === "create") {
-      const intent = typeof payload.intent === "string" ? payload.intent.trim() : "";
+      const userIntent = typeof payload.intent === "string" ? payload.intent.trim() : "";
+      let intent = userIntent;
+      let queueItemId: string | undefined;
+
+      // Grill-from-queue seeding (spec 6): when a queueItemId is present, require the item is
+      // `queued` (404 unknown, 409 not queued) and fold its title/summary/harvestedContext/
+      // sourceRefs into the create-mode intent so the model's first round sees it as originating
+      // context. The lookup runs BEFORE the session is registered so a 404/409 leaks nothing.
+      const rawQueueItemId =
+        typeof payload.queueItemId === "string" ? payload.queueItemId.trim() : "";
+      if (rawQueueItemId) {
+        const queue = await readQueue();
+        const item = queue.items.find((candidate) => candidate.id === rawQueueItemId);
+        if (!item) {
+          return NextResponse.json({ error: "Queue item not found." }, { status: 404 });
+        }
+        if (item.status !== "queued") {
+          return NextResponse.json(
+            { error: "Queue item is not queued.", code: "not-queued" },
+            { status: 409 },
+          );
+        }
+        queueItemId = item.id;
+        intent = buildQueueGrillIntent(item, userIntent);
+      }
+
       if (!intent) {
         return NextResponse.json({ error: "A non-empty intent is required." }, { status: 400 });
       }
@@ -57,6 +85,7 @@ export async function POST(request: Request, context: RouteContext) {
         grillId,
         date,
         mode: "create",
+        ...(queueItemId ? { queueItemId } : {}),
         questionRounds: 0,
         busy: true,
         createdAt: now,

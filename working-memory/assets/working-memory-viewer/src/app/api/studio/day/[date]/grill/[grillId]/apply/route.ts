@@ -9,6 +9,7 @@ import {
   grillErrorResponse,
   requireGrillSession,
 } from "@/lib/interactive-memory/grill-routes";
+import { consumeQueueItem } from "@/lib/interactive-memory/queue-store";
 import type { DayPlan, TaskRecord } from "@/lib/interactive-memory/types";
 
 export const runtime = "nodejs";
@@ -76,6 +77,14 @@ export async function POST(request: Request, context: RouteContext) {
         };
         const saved = await saveDay(date, nextDay, { baseUpdatedAt: bundle.day.updatedAt });
         session.appliedTombstone = { taskId: task.id };
+        // Best-effort queue consume (spec 6): a grill started from a queue candidate marks it
+        // consumed once the task lands. A consume failure is logged and leaves the item queued,
+        // but MUST NOT fail the apply. consumeQueueItem is idempotent, so a replay is safe too.
+        if (session.queueItemId) {
+          await consumeQueueItem(session.queueItemId, task.id).catch((consumeError) => {
+            console.error("Failed to consume queue item after grill apply", consumeError);
+          });
+        }
         return NextResponse.json({ task: findTask(saved.day, task.id), day: saved.day });
       }
 

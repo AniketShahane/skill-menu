@@ -197,6 +197,69 @@ export type StudioCurrentResponse = {
   settingsWarning?: string;
 };
 
+export const QUEUE_SCHEMA_VERSION = 1;
+
+export type QueueItemStatus = "queued" | "dismissed" | "consumed";
+
+export type QueueMatchedTask = {
+  taskId: string;
+  taskDate: string; // YYYY-MM-DD of the day plan the matched task lives on
+  title: string;
+};
+
+export type QueueItem = {
+  id: string; // "queue-" + crypto.randomUUID()
+  status: QueueItemStatus;
+  title: string; // short imperative candidate title
+  summary: string; // 1-2 sentence gist
+  harvestedContext: string; // raw excerpt(s); pre-seeds the grill conversation
+  sourceRefs: SourceRef[]; // reuse existing SourceRef
+  fingerprints: string[]; // stable source event ids, e.g. "slack:C0123:1720900000.123", "jira:PROJ-12:assigned"
+  matchedTask?: QueueMatchedTask; // chip only; never suppresses
+  dismissedBefore?: { at: string }; // set on explicit re-ask of a dismissed topic
+  seenCount: number;
+  firstSeenAt: string; // ISO
+  lastSeenAt: string; // ISO
+  dismissedAt?: string;
+  consumedAt?: string;
+  consumedTaskId?: string; // task created by grill apply
+};
+
+export type QueueSourceHealth = {
+  source: SourceKind; // "slack" | "gmail" | "jira" | "calendar" | "meeting"
+  status: "ok" | "failed" | "skipped";
+  detail?: string;
+};
+
+export type QueueSweepMeta = {
+  lastSweepAt?: string;
+  lastSweepKind?: "scheduled" | "manual" | "morning";
+  checkpoint?: string; // ISO; next sweep harvests events strictly after this
+  sources: QueueSourceHealth[];
+};
+
+export type QueueFile = {
+  schemaVersion: number;
+  updatedAt: string;
+  sweep: QueueSweepMeta;
+  items: QueueItem[];
+};
+
+// Sweep submission shape (what the sweep agent POSTs).
+// Event identity (the same event re-seen) is handled server-side via fingerprints.
+// TOPIC identity (the same ask arriving via a new event) cannot be derived from
+// fingerprints, so the sweep agent decides it and communicates via the id fields.
+export type QueueCandidate = {
+  title: string;
+  summary: string;
+  harvestedContext: string;
+  sourceRefs: SourceRef[];
+  fingerprints: string[]; // at least one, non-empty strings
+  matchedTask?: QueueMatchedTask;
+  mergeIntoItemId?: string; // same ask as an existing QUEUED item, new event
+  reAskOfItemId?: string; // NEW explicit ask re-raising a DISMISSED item
+};
+
 export const STATUS_LABELS: Record<TaskStatus, string> = {
   todo: "To Do",
   in_progress: "In Progress",

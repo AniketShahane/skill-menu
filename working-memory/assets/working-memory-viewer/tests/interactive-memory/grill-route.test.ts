@@ -11,9 +11,22 @@ import {
 import { POST as startGrill } from "@/app/api/studio/day/[date]/grill/route";
 import { normalizeDayPlan, readExistingDay, saveDay } from "@/lib/interactive-memory/fs";
 import { getGrillSessions, PRE_PROPOSAL_ROUND_CAP } from "@/lib/interactive-memory/grill";
-import type { TaskRecord } from "@/lib/interactive-memory/types";
+import { buildQueueGrillIntent } from "@/lib/interactive-memory/grill-routes";
+import { dismissQueueItem, mergeSweep, readQueue } from "@/lib/interactive-memory/queue-store";
+import type { QueueCandidate, QueueItem, TaskRecord } from "@/lib/interactive-memory/types";
+
+// consumeQueueItem is partially mocked so one test can force the server-internal consume to REJECT
+// (a genuine disk failure, not the idempotent no-op) and prove the best-effort failure path (spec
+// 6). It defaults to the REAL implementation, so every other test in this file (including the real
+// consume and double-apply cases) is unchanged.
+const { consumeQueueItemMock } = vi.hoisted(() => ({ consumeQueueItemMock: vi.fn() }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/interactive-memory/queue-store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/interactive-memory/queue-store")>();
+  consumeQueueItemMock.mockImplementation(actual.consumeQueueItem);
+  return { ...actual, consumeQueueItem: consumeQueueItemMock };
+});
 
 const FIXTURE_BIN = path.resolve(process.cwd(), "tests/interactive-memory/fixtures/grill-cli.mjs");
 const DATE = "2099-07-08";
@@ -622,5 +635,153 @@ describe("grill v2 round cap and corrections", () => {
     const json = await res.json();
     expect(json.turn.kind).toBe("proposal");
     expect(Array.isArray(json.computedWarnings)).toBe(true);
+  });
+});
+
+async function seedQueueItem(overrides: Partial<QueueCandidate> = {}): Promise<QueueItem> {
+  const file = await mergeSweep(
+    [
+      {
+        title: "Fix login timeout",
+        summary: "Login times out after a short wait.",
+        harvestedContext: "The teammate flagged repeated timeouts on the login page.",
+        sourceRefs: [{ kind: "slack", label: "chan-one", url: "https://example.test/thread" }],
+        fingerprints: ["slack:c1:1"],
+        ...overrides,
+      },
+    ],
+    { sources: [] },
+  );
+  return file.items[file.items.length - 1];
+}
+
+describe("grill v2 from the monitoring queue (spec 6)", () => {
+  it("builds a create-intent that carries the candidate title, summary, context, and sources", () => {
+    const intent = buildQueueGrillIntent(
+      {
+        id: "queue-1",
+        status: "queued",
+        title: "Fix login timeout",
+        summary: "Login times out after a short wait.",
+        harvestedContext: "The teammate flagged repeated timeouts.",
+        sourceRefs: [{ kind: "slack", label: "chan-one", url: "https://example.test/thread" }],
+        fingerprints: ["slack:c1:1"],
+        seenCount: 1,
+        firstSeenAt: "2099-07-08T00:00:00.000Z",
+        lastSeenAt: "2099-07-08T00:00:00.000Z",
+      },
+      "Also confirm the retry budget.",
+    );
+    expect(intent).toContain("Fix login timeout");
+    expect(intent).toContain("Login times out after a short wait.");
+    expect(intent).toContain("The teammate flagged repeated timeouts.");
+    expect(intent).toContain("slack: chan-one (https://example.test/thread)");
+    expect(intent).toContain("Also confirm the retry budget.");
+  });
+
+  it("seeds the session with queueItemId and consumes the item on apply (no day yet)", async () => {
+    await configureEnv({ enableGrill: true });
+    // No seedDay: grilling from the queue must work with no existing day plan (readOrCreateDay).
+    const item = await seedQueueItem();
+
+    const startRes = await start({ mode: "create", queueItemId: item.id });
+    expect(startRes.status).toBe(200);
+    const startJson = await startRes.json();
+    expect(startJson.turn.kind).toBe("questions");
+    expect(getGrillSessions().get(startJson.grillId)?.queueItemId).toBe(item.id);
+
+    const answerRes = await answer(startJson.grillId, { message: "Dedupe the helpers." });
+    const answerJson = await answerRes.json();
+    expect(answerJson.turn.kind).toBe("proposal");
+
+    const applyRes = await apply(startJson.grillId, { proposal: answerJson.turn });
+    expect(applyRes.status).toBe(200);
+    const applyJson = await applyRes.json();
+    expect(applyJson.day.tasks).toHaveLength(1);
+
+    const consumed = (await readQueue()).items.find((entry) => entry.id === item.id);
+    expect(consumed?.status).toBe("consumed");
+    expect(consumed?.consumedTaskId).toBe(applyJson.task.id);
+  });
+
+  it("replays a double-apply from the tombstone and leaves the item consumed once", async () => {
+    await configureEnv({ enableGrill: true });
+    const item = await seedQueueItem();
+    const startRes = await start({ mode: "create", queueItemId: item.id });
+    const { grillId } = await startRes.json();
+    const answerJson = await (await answer(grillId, { message: "Dedupe." })).json();
+
+    const first = await apply(grillId, { proposal: answerJson.turn });
+    const firstJson = await first.json();
+    const second = await apply(grillId, { proposal: answerJson.turn });
+    expect(second.status).toBe(200);
+    expect((await second.json()).task.id).toBe(firstJson.task.id);
+
+    const consumed = (await readQueue()).items.find((entry) => entry.id === item.id);
+    expect(consumed?.status).toBe("consumed");
+    expect(consumed?.consumedTaskId).toBe(firstJson.task.id);
+  });
+
+  it("returns 404 for an unknown queueItemId and leaks no session", async () => {
+    await configureEnv({ enableGrill: true });
+    const res = await start({ mode: "create", queueItemId: "queue-does-not-exist" });
+    expect(res.status).toBe(404);
+    expect(getGrillSessions().size).toBe(0);
+  });
+
+  it("returns 409 not-queued when the queue item is already dismissed", async () => {
+    await configureEnv({ enableGrill: true });
+    const item = await seedQueueItem();
+    await dismissQueueItem(item.id, (await readQueue()).updatedAt);
+    const res = await start({ mode: "create", queueItemId: item.id });
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("not-queued");
+    expect(getGrillSessions().size).toBe(0);
+  });
+
+  it("apply still succeeds when the item was dismissed mid-grill (best-effort consume no-ops)", async () => {
+    await configureEnv({ enableGrill: true });
+    const item = await seedQueueItem();
+    const startRes = await start({ mode: "create", queueItemId: item.id });
+    const { grillId } = await startRes.json();
+
+    // Out-of-band dismiss while the grill is in progress (dismiss-while-grilling race).
+    await dismissQueueItem(item.id, (await readQueue()).updatedAt);
+
+    const answerJson = await (await answer(grillId, { message: "Dedupe." })).json();
+    const applyRes = await apply(grillId, { proposal: answerJson.turn });
+    expect(applyRes.status).toBe(200); // consume no-ops but never fails the apply
+    expect((await applyRes.json()).day.tasks).toHaveLength(1);
+
+    const stillDismissed = (await readQueue()).items.find((entry) => entry.id === item.id);
+    expect(stillDismissed?.status).toBe("dismissed");
+    expect(stillDismissed?.consumedTaskId).toBeUndefined();
+  });
+
+  it("keeps the apply a 200 and leaves the item queued when the best-effort consume rejects", async () => {
+    await configureEnv({ enableGrill: true });
+    const item = await seedQueueItem();
+    const startRes = await start({ mode: "create", queueItemId: item.id });
+    const { grillId } = await startRes.json();
+    const answerJson = await (await answer(grillId, { message: "Dedupe." })).json();
+
+    // Force the server-internal consume to reject once (e.g. a disk error mid read-modify-write).
+    // Spec 6: a consume failure is logged and leaves the item queued but MUST NOT fail the apply.
+    // If a refactor dropped the .catch (or ran consume before saveDay), the created task would come
+    // back as a 500 and double-charge the retry; this test pins the guard.
+    consumeQueueItemMock.mockClear();
+    consumeQueueItemMock.mockRejectedValueOnce(new Error("queue write failed"));
+
+    const applyRes = await apply(grillId, { proposal: answerJson.turn });
+    expect(applyRes.status).toBe(200);
+    const applyJson = await applyRes.json();
+    expect(applyJson.day.tasks).toHaveLength(1);
+    expect(applyJson.task.id).toBeTruthy();
+    expect(consumeQueueItemMock).toHaveBeenCalledWith(item.id, applyJson.task.id);
+
+    // The rejection means the real consume never ran, so the candidate is still awaiting triage.
+    const stillQueued = (await readQueue()).items.find((entry) => entry.id === item.id);
+    expect(stillQueued?.status).toBe("queued");
+    expect(stillQueued?.consumedTaskId).toBeUndefined();
   });
 });

@@ -94,6 +94,8 @@ import {
   type CompletionFact as DayCompletionFact,
   type DayPlan,
   type PromptSettings,
+  type QueueFile,
+  type QueueItem,
   type SourceKind,
   type SourceRef,
   STATUS_LABELS,
@@ -112,6 +114,13 @@ import {
   type GrillChatPhase,
   type GrillTranscriptEntry,
 } from "./grill-chat-drawer";
+import {
+  buildQueueGrillStartBody,
+  getQueuedItems,
+  hasFailedSweepSource,
+  QueuePanel,
+  StudioQueueChip,
+} from "./queue-panel";
 
 const STATUS_ORDER: TaskStatus[] = ["todo", "in_progress", "review", "done"];
 const TASK_KIND_META: Record<
@@ -317,6 +326,8 @@ type GrillState = {
   taskSnapshot?: TaskRecord; // revise: task at start, diff baseline until a task-changed 409
   freshTask?: TaskRecord; // revise: fresh task returned by a task-changed 409
   intent?: string; // create: the intent text, kept for retry + the copy-prompt fallback
+  queueItemId?: string; // create-from-queue: the monitoring-queue candidate seeding this grill
+  fromQueue?: boolean; // create-from-queue: drives the drawer kicker
   entries: GrillTranscriptEntry[]; // client-accumulated history
   active?: GrillActiveTurn; // the current turn awaiting user action
   phase: GrillChatPhase;
@@ -513,6 +524,11 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
   const [deployState, setDeployState] = useState<DeployState | undefined>();
   const [grillEnabled, setGrillEnabled] = useState(false);
   const [grillState, setGrillState] = useState<GrillState | undefined>();
+  const [queue, setQueue] = useState<QueueFile | undefined>();
+  const [queueError, setQueueError] = useState<string | undefined>();
+  const [queueCollapsed, setQueueCollapsed] = useState(() =>
+    readBooleanPreference("interactive-memory-queue-collapsed", false),
+  );
   const [batchDeployOpen, setBatchDeployOpen] = useState(false);
   const [batchDeploySnapshot, setBatchDeploySnapshot] = useState<
     Array<{ id: string; title: string }>
@@ -535,6 +551,7 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
   const latestUpdatedAtRef = useRef<string | undefined>(undefined);
   const latestPayloadRef = useRef<string | undefined>(undefined);
   const grillRunRef = useRef(0);
+  const queuePanelRef = useRef<HTMLElement | null>(null);
   const modalTitleId = selectedTaskId ? `task-modal-title-${selectedTaskId}` : undefined;
   const prefersReducedMotion = useReducedMotion();
   const rowHeight = Math.max(ROW_HEIGHT_BY_DENSITY[densityMode], ROW_HEIGHT_BY_DENSITY.comfortable);
@@ -543,6 +560,18 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor),
   );
+
+  // Monitoring queue fetch (spec 6/7): read the rolling queue.json snapshot. Failure is
+  // non-fatal (the queue lane simply stays hidden); the studio never blocks on it.
+  const refetchQueue = useCallback(async () => {
+    try {
+      const response = await fetch("/api/studio/queue");
+      if (!response.ok) return;
+      setQueue((await response.json()) as QueueFile);
+    } catch {
+      // Non-critical: leave the last known queue in place.
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -754,6 +783,18 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
   }, [trackersCollapsed]);
 
   useEffect(() => {
+    writeBooleanPreference("interactive-memory-queue-collapsed", queueCollapsed);
+  }, [queueCollapsed]);
+
+  // Fetch the monitoring queue on load and refetch on window focus (spec 7: no polling in v1).
+  useEffect(() => {
+    void refetchQueue();
+    const onFocus = () => void refetchQueue();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refetchQueue]);
+
+  useEffect(() => {
     writeBooleanPreference("interactive-memory-fit-day", fitDayEnabled);
   }, [fitDayEnabled]);
 
@@ -806,6 +847,9 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
     Boolean(directDeployWarning) ||
     templatePromptWarningsCount > 0;
   const externalTrackers = useMemo(() => sortTrackers(day?.trackers ?? []), [day?.trackers]);
+  const queuedItems = useMemo(() => getQueuedItems(queue), [queue]);
+  const queueHasFailedSource = hasFailedSweepSource(queue?.sweep);
+  const queueVisible = queuedItems.length > 0 || queueHasFailedSource;
   const todayDate = useMemo(
     () => currentResolution?.today ?? (day ? todayInTimeZone(day.timezone) : ""),
     [currentResolution?.today, day],
@@ -992,16 +1036,83 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
     setGrillState({ mode: "create", date, entries: [], phase: "intent" });
   }
 
-  async function runGrillCreateStart(grillDate: string, intent: string) {
+  // Grill from a queue candidate (spec 6/7): reuse the create-mode grill state machine, target
+  // today's plan, and seed the interview via queueItemId. Skips the intent phase because the
+  // server folds the harvested context into the create intent. On apply the task lands on today
+  // and the queue item is consumed server-side; the drawer close then refetches the queue.
+  function grillFromQueue(item: QueueItem) {
+    const grillDate = todayDate || date;
+    if (!grillDate) return;
+    discardGrill();
+    setGrillState({
+      mode: "create",
+      date: grillDate,
+      queueItemId: item.id,
+      fromQueue: true,
+      entries: [],
+      phase: "waiting",
+    });
+    void runGrillCreateStart(grillDate, "", item.id);
+  }
+
+  function openQueuePanel() {
+    // The QueuePanel mounts only on the plan tab, so honor the spec 7 chip contract (expand +
+    // scroll) from any tab by switching to plan first. The panel ref is not attached until the
+    // plan section mounts, so defer the scroll to the next frame once it exists.
+    setActiveTab("plan");
+    setQueueCollapsed(false);
+    requestAnimationFrame(() => {
+      queuePanelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }
+
+  // Dismiss a queue candidate (spec 7): optimistic whole-file check via baseUpdatedAt. A 409 means
+  // a sweep or another dismiss landed first, so refetch and surface the existing warning affordance.
+  async function handleDismissQueueItem(item: QueueItem) {
+    if (!queue) return;
+    const baseUpdatedAt = queue.updatedAt;
+    try {
+      const response = await fetch(`/api/studio/queue/${item.id}/dismiss`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseUpdatedAt }),
+      });
+      const body = (await response.json().catch(() => ({}))) as QueueFile & { error?: string };
+      if (!response.ok) {
+        if (response.status === 409) {
+          await refetchQueue();
+          setQueueError(
+            "The monitoring queue changed. It has been refreshed: try dismissing again.",
+          );
+          return;
+        }
+        setQueueError(body.error || `Could not dismiss the candidate (HTTP ${response.status}).`);
+        return;
+      }
+      setQueue(body as QueueFile);
+      setQueueError(undefined);
+    } catch (error) {
+      setQueueError(
+        error instanceof Error ? error.message : "Could not dismiss the monitoring queue item.",
+      );
+    }
+  }
+
+  async function runGrillCreateStart(grillDate: string, intent: string, queueItemId?: string) {
     const runId = ++grillRunRef.current;
     setGrillState((prev) =>
       prev ? { ...prev, intent, phase: "waiting", error: undefined } : prev,
     );
     try {
+      // Grill-from-queue posts only the queue item id: the server seeds the interview from the
+      // candidate's harvested context (spec 6). A plain create posts the typed intent.
+      const startBody = queueItemId
+        ? buildQueueGrillStartBody(queueItemId)
+        : { mode: "create" as const, intent };
       const { ok, status, body } = await grillRequest(`/api/studio/day/${grillDate}/grill`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "create", intent }),
+        body: JSON.stringify(startBody),
       });
       if (grillRunRef.current !== runId) return;
       if (!ok) {
@@ -1264,13 +1375,25 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
       }
       const nextDay = body.day as DayPlan | undefined;
       if (nextDay) {
-        baseUpdatedAtRef.current = nextDay.updatedAt;
-        setDay(nextDay);
+        // A plain create/revise grill always targets the selected date, so the applied day is the
+        // one on screen and we refresh it in place. A queue grill always targets today (spec 7);
+        // when a DIFFERENT date is displayed, the applied day is today's, not the selected day.
+        // Stamping today's plan onto the selected date would desync date/day and 409 the next
+        // autosave, so instead navigate to the day the task actually landed on.
+        if (grillDate === date) {
+          baseUpdatedAtRef.current = nextDay.updatedAt;
+          setDay(nextDay);
+        } else {
+          setPendingDate(grillDate);
+        }
         setDirty(false);
         setSaveState("saved");
       }
       // done (spec 7.2): drawer closes, board refreshes from the returned day.
       setGrillState(undefined);
+      // Refetch the queue (spec 7): a queue-seeded apply consumed the candidate server-side, so it
+      // should leave the list. Harmless for a plain create grill.
+      void refetchQueue();
     } catch (error) {
       if (grillRunRef.current !== runId) return;
       applyGrillFailure(
@@ -1324,7 +1447,9 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
     const current = grillState;
     if (!current) return;
     if (current.failedStage === "start") {
-      if (current.mode === "create" && current.intent) {
+      if (current.mode === "create" && current.queueItemId) {
+        void runGrillCreateStart(current.date, "", current.queueItemId);
+      } else if (current.mode === "create" && current.intent) {
         void runGrillCreateStart(current.date, current.intent);
       } else if (current.mode === "revise" && current.taskId && current.taskSnapshot) {
         void runGrillReviseStart(current.date, current.taskId, current.taskSnapshot, true);
@@ -1343,7 +1468,18 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
   function startOverGrill() {
     const current = grillState;
     if (!current) return;
-    if (current.mode === "create") {
+    if (current.mode === "create" && current.queueItemId) {
+      const queueItemId = current.queueItemId;
+      setGrillState({
+        mode: "create",
+        date: current.date,
+        queueItemId,
+        fromQueue: true,
+        entries: [],
+        phase: "waiting",
+      });
+      void runGrillCreateStart(current.date, "", queueItemId);
+    } else if (current.mode === "create") {
       setGrillState({ mode: "create", date: current.date, entries: [], phase: "intent" });
     } else if (current.taskId && current.taskSnapshot) {
       grillReviseTask(current.taskSnapshot, { restart: true });
@@ -1835,7 +1971,10 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
               }}
               grillEnabled={grillEnabled}
               onGrillNew={grillNewTicket}
+              onOpenQueue={openQueuePanel}
               paletteMode={paletteMode}
+              queueCount={queuedItems.length}
+              queueHasFailedSource={queueHasFailedSource}
               saveState={saveState}
               setActiveTab={setActiveTab}
               setCaptureOpen={() => openCapture("task")}
@@ -1843,6 +1982,7 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
               setPendingDate={setPendingDate}
               setDensityMode={setDensityMode}
               setPaletteMode={setPaletteMode}
+              showQueueChip={queueVisible}
             />
 
             <AnimatePresence>
@@ -1854,6 +1994,9 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
               {settingsWarning ? (
                 <StudioCurrentWarning key="settings-warning" message={settingsWarning} />
               ) : null}
+            </AnimatePresence>
+            <AnimatePresence>
+              {queueError ? <StudioCurrentWarning key="queue-error" message={queueError} /> : null}
             </AnimatePresence>
 
             <AnimatePresence initial={false}>
@@ -1881,6 +2024,20 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
                       trackers={externalTrackers}
                       workDate={day.date}
                     />
+
+                    {queueVisible ? (
+                      <QueuePanel
+                        collapsed={queueCollapsed}
+                        containerRef={queuePanelRef}
+                        grillEnabled={grillEnabled}
+                        items={queuedItems}
+                        onDismiss={(item) => void handleDismissQueueItem(item)}
+                        onGrill={grillFromQueue}
+                        onToggleCollapsed={() => setQueueCollapsed((current) => !current)}
+                        sweep={queue?.sweep ?? { sources: [] }}
+                        timeZone={day.timezone}
+                      />
+                    ) : null}
 
                     <div className="lane-grid">
                       {STATUS_ORDER.map((status) => (
@@ -1978,10 +2135,13 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
                   entries={grillState.entries}
                   error={grillState.error}
                   freshTask={grillState.freshTask}
+                  fromQueue={Boolean(grillState.fromQueue)}
                   headerTitle={
                     grillState.mode === "revise"
                       ? (grillState.taskSnapshot?.title ?? "Revise ticket")
-                      : "New ticket"
+                      : grillState.fromQueue
+                        ? "From monitoring queue"
+                        : "New ticket"
                   }
                   key={`${grillState.mode}:${grillState.taskId ?? "new"}`}
                   mode={grillState.mode}
@@ -2240,7 +2400,10 @@ function StudioHeader({
   grillEnabled,
   onGrillNew,
   onOpenBatchDeploy,
+  onOpenQueue,
   paletteMode,
+  queueCount,
+  queueHasFailedSource,
   saveState,
   setActiveTab,
   setCaptureOpen,
@@ -2248,6 +2411,7 @@ function StudioHeader({
   setPendingDate,
   setDensityMode,
   setPaletteMode,
+  showQueueChip,
 }: {
   activeTab: StudioTab;
   availableDays: string[];
@@ -2259,7 +2423,10 @@ function StudioHeader({
   grillEnabled: boolean;
   onGrillNew: () => void;
   onOpenBatchDeploy: () => void;
+  onOpenQueue: () => void;
   paletteMode: PaletteMode;
+  queueCount: number;
+  queueHasFailedSource: boolean;
   saveState: SaveState;
   setActiveTab: (tab: StudioTab) => void;
   setCaptureOpen: () => void;
@@ -2267,6 +2434,7 @@ function StudioHeader({
   setPendingDate: (date: string) => void;
   setDensityMode: (density: DensityMode) => void;
   setPaletteMode: (palette: PaletteMode) => void;
+  showQueueChip: boolean;
 }) {
   const dateListId = useId();
 
@@ -2318,6 +2486,13 @@ function StudioHeader({
           <Rocket className="h-4 w-4" />
           Deploy All Agent-Ready
         </button>
+        {showQueueChip ? (
+          <StudioQueueChip
+            count={queueCount}
+            hasFailedSource={queueHasFailedSource}
+            onOpen={onOpenQueue}
+          />
+        ) : null}
         <div className={cn("studio-pill", saveState === "error" && "studio-pill-danger")}>
           {saveState === "saving" ? (
             <Loader2 className="h-4 w-4 animate-spin" />

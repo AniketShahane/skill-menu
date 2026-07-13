@@ -22,7 +22,7 @@ import { assertDateKey } from "./paths";
 import { getPromptWarnings } from "./prompt";
 import { assertLocalOrigin, ForbiddenOriginError } from "./route-guards";
 import { buildNewTask } from "./task-factory";
-import type { TaskRecord } from "./types";
+import type { QueueItem, TaskRecord } from "./types";
 
 // Shared guard for every grill route (spec 6.2): feature flag, then the local-origin check,
 // then day-key validation. Throws typed errors mapped by grillErrorResponse(); assertDateKey's
@@ -121,6 +121,34 @@ export function recordTurn(session: GrillSession, turn: GrillTurn) {
     session.questionRounds += 1;
   }
   session.lastActivityAt = Date.now();
+}
+
+// Seeds a create grill started from a monitoring-queue candidate (spec 6). The candidate's title,
+// summary, harvested context, and sourceRefs are folded into the create-mode `intent` so they flow
+// through the EXISTING create session-start pathway (buildGrillSystemPrompt's USER INTENT channel);
+// no second session type is introduced. An optional user-typed note is appended below.
+export function buildQueueGrillIntent(item: QueueItem, userIntent?: string): string {
+  const lines: string[] = ["Candidate captured by the continuous monitoring queue."];
+  lines.push("", `Title: ${item.title}`);
+  if (item.summary.trim()) lines.push("", `Summary: ${item.summary.trim()}`);
+  if (item.harvestedContext.trim()) {
+    lines.push("", "Harvested context:", item.harvestedContext.trim());
+  }
+  if (item.sourceRefs.length > 0) {
+    lines.push("", "Sources:");
+    for (const source of item.sourceRefs) {
+      lines.push(
+        source.url
+          ? `- ${source.kind}: ${source.label} (${source.url})`
+          : `- ${source.kind}: ${source.label}`,
+      );
+    }
+  }
+  const trimmedUserIntent = userIntent?.trim();
+  if (trimmedUserIntent) {
+    lines.push("", "Additional note from me:", trimmedUserIntent);
+  }
+  return lines.join("\n");
 }
 
 // Create-apply constructor: a brand-new task from the approved proposal, via the shared

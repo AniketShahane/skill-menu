@@ -66,6 +66,7 @@ Only read and write the Interactive Working Memory JSON archive. If a `day.json`
 | Show today's plan / what's my plan                                                  | **READ TODAY** (below)                                                                                                                                         |
 
 Read source query templates when scanning: [references/source-queries.md](references/source-queries.md)
+Continuous-monitoring sweep routine: [references/sweep-flow.md](references/sweep-flow.md)
 JSON archive contract and examples: [references/note-templates.md](references/note-templates.md)
 Viewer contract: [assets/working-memory-viewer/docs/interactive-working-memory.md](assets/working-memory-viewer/docs/interactive-working-memory.md)
 Packaged scripts: `scripts/install-skill.sh` for internal-Git local installs, plus `scripts/install-studio.sh`, `scripts/start-studio.sh`, `scripts/ensure-studio.sh`, `scripts/stop-studio.sh`, and `scripts/validate-studio.sh` for the bundled Studio.
@@ -254,6 +255,28 @@ Core grilling set:
 - No prior `day.json` found: start fresh and skip carry-forward.
 - Duplicate morning invocation: detect today's `day.json` with `lifecycle.morningRunAt`, offer: add to it / rebuild / just show it.
 - Empty inbox: _"Clean inbox. Any personal items or projects to focus on today?"_
+
+---
+
+## Continuous Monitoring Queue
+
+Between good mornings, two calendar-aware sweeps a day harvest action-item candidates from Slack, Gmail, Jira, Calendar, and meeting transcripts into a rolling `queue.json`, stored in the archive dir separately from `day.json` so background writes never contend with user edits. The studio shows a `Queue · N` header chip and a collapsible queue panel styled like the trackers panel.
+
+The queue is a capture net, not a plan:
+
+- Queue actions are exactly Grill and Dismiss. Nothing auto-lands, not even a Jira ticket assigned to the user. Grilling is the ONLY path from a candidate to a real task.
+- The good morning stays daily and interactive; sweeps only gather candidates. No sweep may create a task, ticket, or day plan, or send any outbound message.
+- Dismissal is event-scoped, not topic-forever: ambient re-mentions of a dismissed topic stay suppressed, but a new explicit ask directed at the user re-queues as a new item carrying a "dismissed before" marker.
+- Un-grilled items roll over day to day. The morning flow surfaces queued items during planning (Step 3); the evening flow reports the un-triaged count.
+- The headless sweep routine, including topic identity, the candidate bar, fingerprint formats, and the honest per-source submission protocol, lives in [references/sweep-flow.md](references/sweep-flow.md).
+
+### ACTIVATION CHECKLIST
+
+Scheduled sweeps are OFF by default in v1. Until this checklist is complete, run sweeps manually by invoking [references/sweep-flow.md](references/sweep-flow.md) in a session. The morning flow computes the two daily sweep times either way, but refreshes scheduled jobs only once scheduling is activated here.
+
+1. Smoke-test that a scheduled headless run reaches the Calendar connector. A scheduled agent runs in a different environment than an interactive session; confirm it can authenticate and list events before trusting the automation.
+2. Enable the two scheduled sweep jobs. The morning flow's Step 6.5 refreshes them daily at the computed 12:00 / 16:00 times, each deferred to the end of an overlapping meeting block.
+3. Verify the first sweep writes `queue.json` and the studio shows the `Queue · N` chip and panel.
 
 ---
 
