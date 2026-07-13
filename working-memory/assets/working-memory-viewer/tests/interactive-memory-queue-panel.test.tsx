@@ -181,6 +181,28 @@ describe("QueuePanel rows and chips", () => {
     expect(screen.getByText(/last sweep/)).toBeTruthy();
   });
 
+  it("caps source chips at two and folds the rest into a +N pill", () => {
+    renderPanel({
+      items: [
+        makeItem({
+          sourceRefs: [
+            { kind: "slack", label: "team channel" },
+            { kind: "jira", label: "PROJ-1" },
+            { kind: "gmail", label: "inbox" },
+            { kind: "calendar", label: "sync block" },
+          ],
+        }),
+      ],
+    });
+    // Four distinct kinds -> first two chips render, the remaining two collapse into "+2" so the
+    // title line never wraps the fixed-height card.
+    expect(screen.getByText("Slack")).toBeTruthy();
+    expect(screen.getByText("Jira")).toBeTruthy();
+    expect(screen.queryByText("Gmail")).toBeNull();
+    expect(screen.queryByText("Calendar")).toBeNull();
+    expect(screen.getByText("+2")).toBeTruthy();
+  });
+
   it("renders the possible-match and dismissed-before chips when present", () => {
     renderPanel({
       items: [
@@ -205,6 +227,17 @@ describe("QueuePanel rows and chips", () => {
     });
     expect(screen.getByText(/No captured candidates/)).toBeTruthy();
     expect(screen.getByText(/Gmail failed/)).toBeTruthy();
+  });
+
+  it("renders the empty state and sweep footer with no items and healthy sources", () => {
+    // The panel is now a permanent sibling of the trackers panel, so an empty healthy queue
+    // still shows the empty copy plus the footer rather than unmounting.
+    renderPanel({ items: [], sweep: makeSweep() });
+    expect(screen.getByText("No captured candidates awaiting triage.")).toBeTruthy();
+    const footer = screen.getByText(/last sweep/);
+    expect(footer).toBeTruthy();
+    expect(footer.textContent).toContain("Slack ok");
+    expect(footer.textContent).toContain("Gmail ok");
   });
 });
 

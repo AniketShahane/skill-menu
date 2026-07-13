@@ -45,6 +45,10 @@ const SOURCE_CHIP_META: Record<
   manual: { label: "Manual", icon: PencilLine, className: "source-manual" },
 };
 
+// One line of source chips only, matching the trackers card: cap the visible chips and fold the
+// remainder into a "+N" pill so the title line never wraps the fixed-height card.
+const MAX_VISIBLE_SOURCE_CHIPS = 2;
+
 // The queued lane counts only items still awaiting triage (spec 7). Dismissed/consumed items stay
 // in the file for merge/re-ask bookkeeping but never render.
 export function getQueuedItems(queue: QueueFile | undefined): QueueItem[] {
@@ -285,22 +289,29 @@ function QueueItemRow({
   timeZone: string;
 }) {
   const kinds = distinctSourceKinds(item.sourceRefs);
+  const visibleKinds = kinds.slice(0, MAX_VISIBLE_SOURCE_CHIPS);
+  const hiddenSourceCount = kinds.length - visibleKinds.length;
   return (
     <div className="monitoring-queue-item-body">
       <div className="monitoring-queue-item-top">
-        <strong className="monitoring-queue-item-title">{item.title}</strong>
+        <strong className="monitoring-queue-item-title" title={item.title}>
+          {item.title}
+        </strong>
         {kinds.length > 0 ? (
           <div className="monitoring-queue-item-sources">
-            {kinds.map((kind) => {
+            {visibleKinds.map((kind) => {
               const meta = SOURCE_CHIP_META[kind];
               const Icon = meta.icon;
               return (
                 <span className={cn("source-chip", meta.className)} key={kind}>
-                  <Icon className="h-3.5 w-3.5" />
+                  <Icon className="h-3 w-3" />
                   <span>{meta.label}</span>
                 </span>
               );
             })}
+            {hiddenSourceCount > 0 ? (
+              <span className="monitoring-queue-source-more">+{hiddenSourceCount}</span>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -314,12 +325,12 @@ function QueueItemRow({
           {item.matchedTask ? (
             <span className="monitoring-queue-flag monitoring-queue-flag-match">
               <Link2 className="h-3 w-3" />
-              possible match: {item.matchedTask.title}
+              <span>possible match: {item.matchedTask.title}</span>
             </span>
           ) : null}
           {item.dismissedBefore ? (
             <span className="monitoring-queue-flag monitoring-queue-flag-dismissed">
-              dismissed before {formatShortDate(item.dismissedBefore.at, timeZone)}
+              <span>dismissed before {formatShortDate(item.dismissedBefore.at, timeZone)}</span>
             </span>
           ) : null}
         </div>
@@ -333,7 +344,7 @@ function QueueItemRow({
           title={grillEnabled ? "Grill this candidate into a ticket" : "Grilling is disabled"}
           type="button"
         >
-          <MessageCircleQuestion className="h-3.5 w-3.5" />
+          <MessageCircleQuestion className="h-3 w-3" />
           Grill
         </button>
         <button
@@ -342,7 +353,7 @@ function QueueItemRow({
           title="Dismiss this candidate"
           type="button"
         >
-          <X className="h-3.5 w-3.5" />
+          <X className="h-3 w-3" />
           Dismiss
         </button>
       </div>

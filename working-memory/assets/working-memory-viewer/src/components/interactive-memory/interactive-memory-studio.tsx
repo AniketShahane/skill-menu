@@ -846,10 +846,12 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
     saveState === "saving" ||
     Boolean(directDeployWarning) ||
     templatePromptWarningsCount > 0;
-  const externalTrackers = useMemo(() => sortTrackers(day?.trackers ?? []), [day?.trackers]);
+  const externalTrackers = useMemo(() => selectOpenTrackers(day?.trackers ?? []), [day?.trackers]);
   const queuedItems = useMemo(() => getQueuedItems(queue), [queue]);
   const queueHasFailedSource = hasFailedSweepSource(queue?.sweep);
-  const queueVisible = queuedItems.length > 0 || queueHasFailedSource;
+  // The queue panel now renders unconditionally as a sibling of the trackers panel; this flag
+  // only gates the header chip (spec 7: chip shows on queued items or a failed sweep source).
+  const showQueueChip = queuedItems.length > 0 || queueHasFailedSource;
   const todayDate = useMemo(
     () => currentResolution?.today ?? (day ? todayInTimeZone(day.timezone) : ""),
     [currentResolution?.today, day],
@@ -1982,7 +1984,7 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
               setPendingDate={setPendingDate}
               setDensityMode={setDensityMode}
               setPaletteMode={setPaletteMode}
-              showQueueChip={queueVisible}
+              showQueueChip={showQueueChip}
             />
 
             <AnimatePresence>
@@ -2025,19 +2027,17 @@ export function InteractiveMemoryStudio({ initialDate }: { initialDate?: string 
                       workDate={day.date}
                     />
 
-                    {queueVisible ? (
-                      <QueuePanel
-                        collapsed={queueCollapsed}
-                        containerRef={queuePanelRef}
-                        grillEnabled={grillEnabled}
-                        items={queuedItems}
-                        onDismiss={(item) => void handleDismissQueueItem(item)}
-                        onGrill={grillFromQueue}
-                        onToggleCollapsed={() => setQueueCollapsed((current) => !current)}
-                        sweep={queue?.sweep ?? { sources: [] }}
-                        timeZone={day.timezone}
-                      />
-                    ) : null}
+                    <QueuePanel
+                      collapsed={queueCollapsed}
+                      containerRef={queuePanelRef}
+                      grillEnabled={grillEnabled}
+                      items={queuedItems}
+                      onDismiss={(item) => void handleDismissQueueItem(item)}
+                      onGrill={grillFromQueue}
+                      onToggleCollapsed={() => setQueueCollapsed((current) => !current)}
+                      sweep={queue?.sweep ?? { sources: [] }}
+                      timeZone={day.timezone}
+                    />
 
                     <div className="lane-grid">
                       {STATUS_ORDER.map((status) => (
@@ -2634,7 +2634,7 @@ function CompletionTracker({ progress }: { progress: ProgressSummary }) {
   );
 }
 
-function ExternalTrackersPanel({
+export function ExternalTrackersPanel({
   collapsed,
   onOpenCreateTracker,
   onRequestClose,
@@ -6525,6 +6525,12 @@ function completionFactForTask(
   const pool = facts.length > 0 ? facts : COMPLETION_FACTS;
   const seed = Array.from(title).reduce((sum, character) => sum + character.charCodeAt(0), 0);
   return pool[(seed + progress.done * 7 + progress.percent) % pool.length];
+}
+
+// Open trackers only, sorted for display. Closed trackers (done/dropped) fall out here so the
+// panel, its count pill, and the collapsed summary all reflect open work; day.json keeps them.
+export function selectOpenTrackers(trackers: TrackerRecord[]) {
+  return sortTrackers(trackers.filter((tracker) => !isTrackerClosed(tracker.status)));
 }
 
 function sortTrackers(trackers: TrackerRecord[]) {
