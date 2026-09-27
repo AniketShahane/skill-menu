@@ -1,0 +1,237 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import {
+  AqError,
+  addCandidate,
+  addLedger,
+  computeStats,
+  createStore,
+  declineProposal,
+  findLedger,
+  listItems,
+  recordProposal,
+  run,
+  setSimple,
+  updateItem,
+} from "../scripts/aq.mjs";
+
+const AQ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts", "aq.mjs");
+
+function freshStore() {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "aq-test-"));
+  const store = createStore(home);
+  store.init();
+  return store;
+}
+
+let tick = Date.parse("2026-09-28T09:00:00Z");
+const clock = () => new Date((tick += 1000));
+
+const candidate = (overrides = {}) => ({
+  title: "Send Sam the Q3 export numbers",
+  source: { kind: "slack", who: "Sam Lee", channelId: "C1", ts: "100.1" },
+  excerpt: "Can you send me the Q3 export numbers?",
+  fingerprints: ["slack:C1:100.1"],
+  ...overrides,
+});
+
+test("init seeds memory and state once", () => {
+  const store = freshStore();
+  const memory = fs.readdirSync(store.paths.memory).sort();
+  assert.deepEqual(memory, ["people.md", "playbooks.md", "projects.md", "style.md"]);
+  fs.writeFileSync(path.join(store.paths.memory, "people.md"), "custom");
+  assert.deepEqual(store.init().seededMemory, []);
+  assert.equal(fs.readFileSync(path.join(store.paths.memory, "people.md"), "utf8"), "custom");
+  assert.equal(store.state().nextId, 1);
+});
+
+test("add creates items with sequential ids", () => {
+  const store = freshStore();
+  assert.deepEqual(addCandidate(store, candidate(), clock), { action: "created", id: "AQ-1" });
+  const second = addCandidate(store, candidate({ fingerprints: ["jira:PROJ-1:assigned"] }), clock);
+  assert.deepEqual(second, { action: "created", id: "AQ-2" });
+  const item = store.getItem("AQ-1");
+  assert.equal(item.status, "new");
+  assert.equal(item.history[0].event, "created");
+});
+
+test("add de-duplicates the same event and merges overlapping ones", () => {
+  const store = freshStore();
+  addCandidate(store, candidate(), clock);
+  assert.deepEqual(addCandidate(store, candidate(), clock), { action: "duplicate", id: "AQ-1" });
+  const merged = addCandidate(store, candidate({ fingerprints: ["slack:C1:100.1", "slack:C1:200.2"] }), clock);
+  assert.deepEqual(merged, { action: "merged", id: "AQ-1" });
+  const item = store.getItem("AQ-1");
+  assert.deepEqual(item.fingerprints, ["slack:C1:100.1", "slack:C1:200.2"]);
+  assert.equal(item.seenCount, 2);
+  assert.equal(item.updates.length, 1);
+});
+
+test("mergeInto joins an open item but not a closed one", () => {
+  const store = freshStore();
+  addCandidate(store, candidate(), clock);
+  const followUp = candidate({ fingerprints: ["slack:C1:300.3"], mergeInto: "AQ-1" });
+  assert.deepEqual(addCandidate(store, followUp, clock), { action: "merged", id: "AQ-1" });
+
+  updateItem(store, "AQ-1", { status: "skipped" }, clock);
+  const reAsk = candidate({ fingerprints: ["slack:C1:400.4"], mergeInto: "AQ-1" });
+  assert.deepEqual(addCandidate(store, reAsk, clock), { action: "created", id: "AQ-2" });
+  assert.equal(store.getItem("AQ-2").relatedTo, "AQ-1");
+});
+
+test("add never overwrites an existing item, even with a stale id counter", () => {
+  const store = freshStore();
+  addCandidate(store, candidate(), clock);
+  const state = store.state();
+  state.nextId = 1; // another process saved an older counter
+  store.saveState(state);
+  assert.deepEqual(addCandidate(store, candidate({ fingerprints: ["x"] }), clock), { action: "created", id: "AQ-2" });
+  assert.equal(store.getItem("AQ-1").fingerprints[0], "slack:C1:100.1");
+  fs.writeFileSync(path.join(store.paths.items, "AQ-3.json"), JSON.stringify({ ...store.getItem("AQ-1"), id: "AQ-3" }));
+  state.nextId = 3;
+  store.saveState(state);
+  assert.deepEqual(addCandidate(store, candidate({ fingerprints: ["y"] }), clock), { action: "created", id: "AQ-4" });
+});
+
+test("add rejects malformed candidates", () => {
+  const store = freshStore();
+  assert.throws(() => addCandidate(store, { title: "x", source: { kind: "slack" } }), AqError);
+  assert.throws(() => addCandidate(store, candidate({ fingerprints: [""] })), AqError);
+  assert.throws(() => addCandidate(store, candidate({ status: "done" })), AqError);
+});
+
+test("update enforces the status machine and protects identity fields", () => {
+  const store = freshStore();
+  addCandidate(store, candidate(), clock);
+  assert.throws(() => updateItem(store, "AQ-1", { status: "done" }, clock), /Cannot move AQ-1 from new to done/);
+  assert.throws(() => updateItem(store, "AQ-1", { status: "bogus" }, clock), /Unknown status/);
+  assert.throws(() => updateItem(store, "AQ-1", { patch: { id: "AQ-9" } }, clock), /Cannot update id/);
+
+  updateItem(store, "AQ-1", { status: "approving", patch: { askType: "share-link" } }, clock);
+  updateItem(store, "AQ-1", { status: "approving", note: "revised draft" }, clock);
+  updateItem(store, "AQ-1", { status: "drafted", patch: { draft: { kind: "slack-reply", ref: "d1" } } }, clock);
+  const item = updateItem(store, "AQ-1", { status: "done" }, clock);
+  assert.equal(item.status, "done");
+  assert.deepEqual(
+    item.history.filter((h) => h.from).map((h) => `${h.from}>${h.to}`),
+    ["new>approving", "approving>drafted", "drafted>done"],
+  );
+  assert.throws(() => updateItem(store, "AQ-1", { status: "approving" }, clock), /from done/);
+});
+
+test("list filters open and watched items", () => {
+  const store = freshStore();
+  addCandidate(store, candidate(), clock);
+  addCandidate(store, candidate({ fingerprints: ["b"] }), clock);
+  addCandidate(store, candidate({ fingerprints: ["c"], status: "filtered" }), clock);
+  updateItem(store, "AQ-1", { status: "asking", patch: { card: { channelId: "D_ME", ts: "1.1" } } }, clock);
+  updateItem(store, "AQ-3", { patch: { card: { channelId: "D_ME", ts: "2.2" } } }, clock);
+
+  assert.deepEqual(listItems(store, { open: true }, clock).map((i) => i.id), ["AQ-1", "AQ-2"]);
+  assert.deepEqual(listItems(store, { watch: true }, clock).map((i) => i.id), ["AQ-1", "AQ-3"]);
+  const later = () => new Date(tick + 3 * 24 * 60 * 60 * 1000);
+  // A thread check two days later bumps updatedAt but must not extend the filtered watch window.
+  updateItem(store, "AQ-3", { patch: { card: { channelId: "D_ME", ts: "2.2", lastSeenTs: "3.3" } } }, () =>
+    new Date(tick + 47 * 60 * 60 * 1000),
+  );
+  assert.deepEqual(listItems(store, { watch: true }, later).map((i) => i.id), ["AQ-1"]);
+});
+
+test("ledger find matches all terms, newest first", () => {
+  const store = freshStore();
+  addLedger(store, { id: "AQ-1", outcome: "sent", askType: "share-link", ask: "Q3 export numbers", who: "Sam" }, clock);
+  addLedger(store, { id: "AQ-2", outcome: "sent", askType: "share-link", ask: "Q3 numbers again", who: "Priya" }, clock);
+  addLedger(store, { id: "AQ-3", outcome: "skipped", askType: "review-doc", ask: "Review roadmap", who: "Sam" }, clock);
+  assert.deepEqual(findLedger(store, "q3 numbers").map((e) => e.id), ["AQ-2", "AQ-1"]);
+  assert.deepEqual(findLedger(store, "sam", 1).map((e) => e.id), ["AQ-3"]);
+  assert.throws(() => addLedger(store, { id: "AQ-4", outcome: "maybe" }), AqError);
+});
+
+test("stats: unedited streak drives promotion; edits suggest demotion", () => {
+  const store = freshStore();
+  const sent = (edited) => addLedger(store, { id: "AQ-x", outcome: "sent", askType: "share-link", edited }, clock);
+  sent(true);
+  for (let i = 0; i < 4; i += 1) sent(false);
+  addLedger(store, { id: "AQ-y", outcome: "filtered", askType: "share-link" }, clock);
+  assert.equal(computeStats(store, clock).types["share-link"].uneditedStreak, 4);
+  assert.equal(computeStats(store, clock).types["share-link"].promotable, false);
+
+  sent(false);
+  assert.equal(computeStats(store, clock).types["share-link"].promotable, true);
+
+  recordProposal(store, "share-link", "9.9", clock);
+  assert.equal(computeStats(store, clock).types["share-link"].promotable, false, "cooldown after proposing");
+  assert.deepEqual(computeStats(store, clock).openProposals, [{ type: "share-link", ts: "9.9" }]);
+  declineProposal(store, "share-link");
+  assert.deepEqual(computeStats(store, clock).openProposals, []);
+  assert.equal(computeStats(store, clock).types["share-link"].promotable, false, "decline keeps the cooldown");
+
+  setSimple(store, "share-link", true);
+  let stats = computeStats(store, clock);
+  assert.deepEqual(stats.simpleTypes, ["share-link"]);
+  assert.equal(stats.types["share-link"].demoteSuggested, false);
+
+  sent(true);
+  sent(true);
+  stats = computeStats(store, clock);
+  assert.equal(stats.types["share-link"].demoteSuggested, true);
+  assert.equal(stats.types["share-link"].uneditedStreak, 0);
+
+  setSimple(store, "share-link", false);
+  assert.deepEqual(computeStats(store, clock).simpleTypes, []);
+  assert.throws(() => setSimple(store, "Bad Type!", true), AqError);
+});
+
+test("config and checkpoints round-trip through run()", () => {
+  const store = freshStore();
+  const env = { ASK_QUEUE_HOME: store.paths.home };
+  run(["config", "set", "slack.userId", "U_ME"], env);
+  run(["config", "set", "sources", '{"slack":true,"jira":true}'], env);
+  assert.equal(run(["config", "get", "slack.userId"], env), "U_ME");
+  assert.deepEqual(run(["config", "get", "sources"], env), { slack: true, jira: true });
+  run(["checkpoint", "set", "slack", "2026-09-28T09:00:00Z"], env);
+  assert.deepEqual(run(["checkpoint", "get", "slack"], env), { slack: "2026-09-28T09:00:00Z" });
+  assert.throws(() => run(["config", "set", "timezone", "Mars/Olympus"], env), /Unknown IANA timezone/);
+});
+
+test("--file must stay inside the data directory", () => {
+  const store = freshStore();
+  const env = { ASK_QUEUE_HOME: store.paths.home };
+  assert.throws(() => run(["add", "--file", "/etc/passwd"], env), /inside the data directory/);
+  assert.throws(() => run(["add", "--file", "../outside.json"], env), /inside the data directory/);
+  assert.throws(() => run(["add", "--file"], env), /--file is required/);
+});
+
+test("now reports local time in the configured timezone", () => {
+  const store = freshStore();
+  const env = { ASK_QUEUE_HOME: store.paths.home };
+  run(["config", "set", "timezone", "America/Los_Angeles"], env);
+  const now = run(["now"], env, () => new Date("2026-09-28T16:30:00Z"));
+  assert.equal(now.local, "2026-09-28 09:30");
+  assert.equal(now.timezoneConfirmed, true);
+});
+
+test("settings wires the guard hook with absolute, quoted paths", () => {
+  const store = freshStore();
+  const settings = run(["settings"], { ASK_QUEUE_HOME: store.paths.home });
+  const command = settings.hooks.PreToolUse[0].hooks[0].command;
+  assert.match(command, /^node '\/.+\/scripts\/guard\.mjs' '\/.+'$/);
+});
+
+test("CLI prints JSON and reports errors on stderr with exit 1", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "aq-cli-"));
+  const env = { ...process.env, ASK_QUEUE_HOME: home };
+  execFileSync("node", [AQ, "init"], { env });
+  fs.writeFileSync(path.join(home, "tmp", "c.json"), JSON.stringify(candidate()));
+  const out = JSON.parse(execFileSync("node", [AQ, "add", "--file", "tmp/c.json"], { env, cwd: home }).toString());
+  assert.deepEqual(out, { action: "created", id: "AQ-1" });
+  assert.throws(
+    () => execFileSync("node", [AQ, "get", "AQ-99"], { env, stdio: "pipe" }),
+    (err) => err.status === 1 && /No such item/.test(err.stderr.toString()),
+  );
+});

@@ -2,7 +2,41 @@
 
 Agent skills for [Claude Code](https://docs.claude.com/en/docs/claude-code) and Codex. Each top-level folder is one self-contained skill: clone the repo, run the installer, and go.
 
-First on the menu: **Working Memory**, a daily planning ritual with a live visual board.
+On the menu:
+
+- **Ask Queue** (new): turns asks from Slack, Jira, Zoom and Gmail into cards in your own Slack DM, asks only what it can't work out, and prepares drafts you read and send. It learns from every ask. Built to replace Working Memory.
+- **Working Memory**: a daily planning ritual with a live visual board.
+
+---
+
+## What Ask Queue does
+
+Every ask aimed at you becomes one card in your Slack self-DM, and every card ends in one yes/no.
+
+1. **Every 2 hours** it collects new asks (Slack DMs and @mentions first; Jira, Zoom and Gmail when enabled).
+2. **Before bothering you** it reads the thread, the linked docs and its memory, then either drafts the answer (**Ready** card) or asks 1–3 questions, each with a labeled best guess (**Need answers** card). Reply `ok` to accept the guesses.
+3. **You reply in the card's thread** (`yes`, `skip`, answers, or "make it shorter"). It checks every 15 minutes.
+4. **It creates drafts, never sends.** Slack replies become native Slack drafts in the original thread; email replies become Gmail drafts; bigger write-ups become private Google Docs. You review and send.
+5. **It learns.** Every ask, question, draft and what you actually sent goes into a ledger. Answers and your edits update its memory of people, projects, your writing style and playbooks. When you approve 5 drafts of one kind unedited, it offers to stop asking questions for that kind.
+
+Top-level commands in your self-DM: `ask: <anything>` adds an ask, `note: <fact>` teaches it something, `status` shows the queue.
+
+**Safety:** unattended runs go through a fail-closed hook (`ask-queue/scripts/guard.mjs`) that allows only reads and drafts, and messages only to your own DM. The hook enforces this, so it doesn't rely on instructions alone.
+
+### Install on the machine that will run it (e.g. an EC2 instance)
+
+Needs Node.js 20+ and Claude Code logged in with your claude.ai account, with the Slack connector connected at claude.ai.
+
+```bash
+git clone https://gitlab.com/ashahane1/skill-menu.git
+cd skill-menu
+./ask-queue/scripts/install.sh
+claude   # then say: "set up ask queue"
+```
+
+Setup finds your Slack ids, posts a hello to your self-DM, optionally learns your writing style from recent sent messages, runs `scripts/doctor.sh` (a headless health check), and gives you the two cron lines. Your data stays in `~/.local/share/ask-queue`, outside this repo.
+
+Run the tests with `node --test 'ask-queue/tests/*.test.mjs'`.
 
 ---
 
@@ -90,6 +124,11 @@ Persistent overrides go in `~/.config/working-memory/ensure-studio.local.sh`, wh
 
 ```
 skill-menu/
+  ask-queue/
+    SKILL.md          # rules, modes, state CLI
+    references/       # sweep / replies / cards / learn / setup
+    scripts/          # aq.mjs (state), guard.mjs (safety hook), run.sh (cron), doctor.sh, install.sh
+    templates/memory/ # seed memory files
   working-memory/
     SKILL.md          # the skill definition your agent reads
     references/       # standup / shutdown / setup flows
