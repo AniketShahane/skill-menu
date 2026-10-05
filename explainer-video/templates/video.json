@@ -1,0 +1,22 @@
+{
+  "title": "Untitled explainer",
+  "scenes": [
+    {
+      "file": "s1_intro.py",
+      "class": "S1Intro",
+      "title": "Double the radius"
+    }
+  ],
+  "voice": {
+    "backend": "gemini",
+    "model": "gemini-3.8-flash-tts",
+    "voice": "Charon",
+    "style": "a warm, curious teacher explaining to one friend: unhurried, clear, gently enthusiastic, with natural pauses at commas and full stops",
+    "verify": true,
+    "fallback_to_say": false,
+    "wpm": 120
+  },
+  "pause_after_line": 0.45,
+  "background": "#0E1117",
+  "target_minutes": 1
+}
