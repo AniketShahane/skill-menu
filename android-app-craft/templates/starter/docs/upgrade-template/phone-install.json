@@ -1,0 +1,34 @@
+{
+  "recordedAtUtc": "2026-01-01T00:00:00+00:00",
+  "device": "<model class and Android version, connection (USB or wireless) — never the serial>",
+  "before": {
+    "versionName": "<installed before>",
+    "versionCode": 0,
+    "debuggable": true,
+    "sessionRunning": false,
+    "userItems": 0
+  },
+  "backup": {
+    "folder": ".tools/phone-backup-<version>-<yyyymmdd-hhmmss>",
+    "contents": ["<data dir> (<n> files)", "shared_prefs (<n> files)"],
+    "committed": false,
+    "note": "run-as backups work only while the installed build is debuggable; once a release build is on the phone, this reads 'not possible' and in-app export is the way to keep data"
+  },
+  "install": {
+    "command": "adb -s $APP_PHONE_SERIAL install -r dist/starter-<version>.apk",
+    "apkSha256": "<sha256 of the file installed>",
+    "result": "Success",
+    "compile": "cmd package compile -m speed -f <package>: <dexopt status line>"
+  },
+  "after": {
+    "versionName": "<version>",
+    "versionCode": 0,
+    "debuggable": false,
+    "userItems": 0,
+    "userFilesByteIdentical": true,
+    "launched": "MainActivity focused, no crash in logcat",
+    "observed": "<what the user's own data looked like on the new build; screenshots kept private, not committed>"
+  },
+  "notRun": "<e.g. 'a full session on the new build' — or remove when nothing was skipped>",
+  "distNote": "<if dist/ was rebuilt after install, its sha differs; the sha above is the one on the phone>"
+}

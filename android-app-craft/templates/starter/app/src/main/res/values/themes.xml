@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Compose does the real theming (AppTheme in ui/theme/AppTheme.kt). This window theme is
+      only the no-action-bar shell Compose draws into, parented on the PLATFORM Material theme
+      so there is no AppCompat or Material-Components XML dependency.
+
+      windowBackground is the plate the system paints before this process exists. It is
+      LightColors.canvas written out by hand, because a resource read before the process
+      starts cannot be derived from a Kotlin value. ThemePlateTest holds the two together:
+      retune the palette without this and the cold start opens on a band of the old colour,
+      which no warm launch and no emulator that keeps the process alive will ever show you.
+
+      Both bars are transparent because MainActivity draws edge to edge. The icon contrast is
+      seeded here and then owned by AppTheme, which follows the in-app appearance choice.
+      values-night carries the dark counterpart.
+    -->
+    <style name="Theme.Starter" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#F5F5FA</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

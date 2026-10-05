@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Night mode outranks the version qualifier in resource resolution, so on a dark-mode
+      API 31+ device values-night/themes.xml would win outright and the splash attribute in
+      values-v31 would never be read. This bucket is that intersection: the night style
+      repeated verbatim plus the splash background, so the cold-start frame is the dark
+      canvas from the splash through to the first composed frame.
+
+      Which bucket the system reads is the app's own night mode, set by ThemeStore through
+      UiModeManager. The splash is resolved before this process runs, so that stored mode is
+      the only way an in-app choice can reach it, and it takes effect from the launch after
+      the choice is made.
+
+      Both hex values are DarkColors.canvas written out by hand; ThemePlateTest holds them to
+      it.
+    -->
+    <style name="Theme.Starter" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0E0F16</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowSplashScreenBackground">#0E0F16</item>
+    </style>
+</resources>

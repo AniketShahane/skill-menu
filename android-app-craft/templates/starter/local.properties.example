@@ -1,0 +1,19 @@
+# Copy to local.properties (gitignored) and fill in. Nothing in this file is ever committed,
+# and the build never prints these values.
+
+# The Android SDK. scripts/android-env.sh finds it too; Gradle needs it written here.
+#   macOS, Android Studio:        /Users/<you>/Library/Android/sdk
+#   macOS, Homebrew cmdline-tools: /opt/homebrew/share/android-commandlinetools
+#   Linux:                        /home/<you>/Android/Sdk
+sdk.dir=
+
+# The Play upload key. All four or none: three set and one missing fails the build rather than
+# quietly signing with the debug key (flick:sender/build.gradle.kts:121-165). The keystore
+# lives OUTSIDE this repository; back it up before anything else. With none set, release is
+# signed with the local debug key, which is what lets `adb install -r` keep the phone's data.
+# The same four can come from APP_UPLOAD_STORE_FILE, APP_UPLOAD_STORE_PASSWORD,
+# APP_UPLOAD_KEY_ALIAS and APP_UPLOAD_KEY_PASSWORD in the environment (CI).
+#app.upload.storeFile=/absolute/path/outside/the/repo/upload.jks
+#app.upload.storePassword=
+#app.upload.keyAlias=upload
+#app.upload.keyPassword=

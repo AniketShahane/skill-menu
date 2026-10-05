@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      API 31+ replaces the cold-start window with the system splash screen, so
+      windowBackground alone no longer owns that frame. The splash attributes do not exist
+      below API 31, hence this bucket. Every attribute values/themes.xml sets is repeated
+      verbatim: a qualified bucket REPLACES the style, it does not merge with it.
+
+      Night mode outranks the version qualifier, so this bucket only reaches a light-mode
+      device; values-night-v31 carries the dark counterpart.
+
+      The splash background is the canvas, not a launcher colour, so the splash hands over to
+      a page of the same colour. The splash icon is left to the platform default (the
+      launcher icon); set android:windowSplashScreenAnimatedIcon here once the app has a
+      foreground drawable of its own.
+    -->
+    <style name="Theme.Starter" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#F5F5FA</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowSplashScreenBackground">#F5F5FA</item>
+    </style>
+</resources>

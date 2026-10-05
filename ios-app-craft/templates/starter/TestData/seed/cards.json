@@ -1,0 +1,258 @@
+{
+  "version": 1,
+  "cards": [
+    {
+      "id": "c1",
+      "title": "Ridge loop at sunrise",
+      "category": "Trail",
+      "symbol": "mountain.2.fill",
+      "date": "2026-01-15T07:02:00-05:00",
+      "colors": [
+        "#FF7A59",
+        "#FFC36B"
+      ],
+      "stats": [
+        {
+          "label": "DISTANCE",
+          "value": "12.4",
+          "unit": "km"
+        },
+        {
+          "label": "TIME",
+          "value": "1:08:22"
+        },
+        {
+          "label": "CLIMB",
+          "value": "486",
+          "unit": "m"
+        }
+      ],
+      "notes": "Cold start, clear sky. The ridge path was frozen for the first two kilometres, then soft and fast all the way down.",
+      "highlights": [
+        "Fastest descent this month",
+        "New route",
+        "Sunrise at the summit"
+      ]
+    },
+    {
+      "id": "c2",
+      "title": "Harbour tempo",
+      "category": "Road",
+      "symbol": "figure.run",
+      "date": "2026-01-14T18:40:00-05:00",
+      "colors": [
+        "#3A7BFF",
+        "#7AD7FF"
+      ],
+      "stats": [
+        {
+          "label": "DISTANCE",
+          "value": "8.0",
+          "unit": "km"
+        },
+        {
+          "label": "TIME",
+          "value": "34:10"
+        },
+        {
+          "label": "PACE",
+          "value": "4:16",
+          "unit": "/km"
+        }
+      ],
+      "notes": "Three blocks of tempo along the harbour wall, with the wind behind on the way home.",
+      "highlights": [
+        "Held pace on every block",
+        "Negative split"
+      ]
+    },
+    {
+      "id": "c3",
+      "title": "Long Sunday",
+      "category": "Road",
+      "symbol": "road.lanes",
+      "date": "2026-01-11T09:15:00-05:00",
+      "colors": [
+        "#7B5CFF",
+        "#C39BFF"
+      ],
+      "stats": [
+        {
+          "label": "DISTANCE",
+          "value": "21.1",
+          "unit": "km"
+        },
+        {
+          "label": "TIME",
+          "value": "1:52:40"
+        },
+        {
+          "label": "PACE",
+          "value": "5:20",
+          "unit": "/km"
+        }
+      ],
+      "notes": "A half marathon at an easy effort. Fuelled at 45 and 75 minutes and felt strong to the end.",
+      "highlights": [
+        "Longest run of the year",
+        "Even pacing"
+      ]
+    },
+    {
+      "id": "c4",
+      "title": "Track eights",
+      "category": "Track",
+      "symbol": "stopwatch.fill",
+      "date": "2026-01-09T06:30:00-05:00",
+      "colors": [
+        "#12B886",
+        "#8CE99A"
+      ],
+      "stats": [
+        {
+          "label": "REPS",
+          "value": "8",
+          "unit": "x 400 m"
+        },
+        {
+          "label": "TIME",
+          "value": "41:05"
+        },
+        {
+          "label": "BEST",
+          "value": "78",
+          "unit": "s"
+        }
+      ],
+      "notes": "Eight quarters with 200 m jog recoveries. The last two were the quickest.",
+      "highlights": [
+        "Best 400 m: 78 s",
+        "Consistent within 2 s"
+      ]
+    },
+    {
+      "id": "c5",
+      "title": "Forest recovery",
+      "category": "Trail",
+      "symbol": "tree.fill",
+      "date": "2026-01-07T12:05:00-05:00",
+      "colors": [
+        "#2F9E44",
+        "#A9E34B"
+      ],
+      "stats": [
+        {
+          "label": "DISTANCE",
+          "value": "6.2",
+          "unit": "km"
+        },
+        {
+          "label": "TIME",
+          "value": "38:50"
+        },
+        {
+          "label": "HEART",
+          "value": "132",
+          "unit": "bpm"
+        }
+      ],
+      "notes": "Slow and chatty through the pines. Legs came back after yesterday's session.",
+      "highlights": [
+        "Low heart rate throughout"
+      ]
+    },
+    {
+      "id": "c6",
+      "title": "City night run",
+      "category": "Road",
+      "symbol": "moon.stars.fill",
+      "date": "2026-01-05T21:20:00-05:00",
+      "colors": [
+        "#364FC7",
+        "#9775FA"
+      ],
+      "stats": [
+        {
+          "label": "DISTANCE",
+          "value": "10.0",
+          "unit": "km"
+        },
+        {
+          "label": "TIME",
+          "value": "49:30"
+        },
+        {
+          "label": "PACE",
+          "value": "4:57",
+          "unit": "/km"
+        }
+      ],
+      "notes": "Lights on the bridges and empty streets. A steady ten at the end of a long day.",
+      "highlights": [
+        "Ten in under fifty"
+      ]
+    },
+    {
+      "id": "c7",
+      "title": "Hill repeats",
+      "category": "Trail",
+      "symbol": "arrow.up.right",
+      "date": "2026-01-03T08:00:00-05:00",
+      "colors": [
+        "#E8590C",
+        "#FFA94D"
+      ],
+      "stats": [
+        {
+          "label": "REPS",
+          "value": "6",
+          "unit": "x 90 s"
+        },
+        {
+          "label": "TIME",
+          "value": "45:12"
+        },
+        {
+          "label": "CLIMB",
+          "value": "312",
+          "unit": "m"
+        }
+      ],
+      "notes": "Six hard climbs on the quarry hill, walking down between each one.",
+      "highlights": [
+        "Strongest final rep"
+      ]
+    },
+    {
+      "id": "c8",
+      "title": "New Year shakeout",
+      "category": "Road",
+      "symbol": "sparkles",
+      "date": "2026-01-01T10:00:00-05:00",
+      "colors": [
+        "#C2255C",
+        "#F783AC"
+      ],
+      "stats": [
+        {
+          "label": "DISTANCE",
+          "value": "5.0",
+          "unit": "km"
+        },
+        {
+          "label": "TIME",
+          "value": "27:45"
+        },
+        {
+          "label": "PACE",
+          "value": "5:33",
+          "unit": "/km"
+        }
+      ],
+      "notes": "An easy first run of the year with friends, finishing at the bakery.",
+      "highlights": [
+        "First run of 2026"
+      ]
+    }
+  ]
+}

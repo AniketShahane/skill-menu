@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Every user-facing string lives here, with a comment where a string carries a constraint the
+  words cannot show (length, where it is drawn, what it must not say).
+
+  Voice (references/components.md, "Copy voice"):
+  - Concrete and second person. Name the thing as the user knows it, not as the code models it.
+  - An error says the problem, then the fix. Add one clause for the wrong cause the user would
+    otherwise chase ("The app isn't broken"), never an apology.
+  - A dialog pairs its verbs: the one that acts and the one that keeps things as they are.
+  - No filler, and no body line that repeats its own title.
+-->
+<resources>
+    <string name="app_name">Starter</string>
+
+    <!-- Bar tab names, one per Route tab (tab_<name>). Drawn on one line inside the selection
+         capsule and stepped down to fit, so keep them to one short word. -->
+    <string name="tab_home">Home</string>
+    <string name="tab_settings">Settings</string>
+
+    <!-- InfoButton. %1$s is the card's title. -->
+    <string name="info_button_label">About %1$s</string>
+    <string name="info_dismiss">Got it</string>
+
+    <string name="back">Back</string>
+    <string name="unit_minutes">min</string>
+    <!-- A session's length in a list row. Mono, one line. -->
+    <string name="minutes_short">%1$d min</string>
+
+    <!-- Chart content descriptions: what the chart shows and how to read one value. -->
+    <plurals name="chart_bars_description">
+        <item quantity="one">Bar chart with one bar. Tap it to read it.</item>
+        <item quantity="other">Bar chart with %d bars. Tap or drag across it to read one.</item>
+    </plurals>
+    <plurals name="chart_line_description">
+        <item quantity="one">Line chart with one point. Tap it to read it.</item>
+        <item quantity="other">Line chart with %d points. Tap or drag across it to read one.</item>
+    </plurals>
+
+    <!-- Home. Shown as an eyebrow, so it is uppercased on screen. -->
+    <string name="home_loading">Reading your sessions…</string>
+    <string name="home_hero_label">Minutes this week</string>
+    <string name="home_hero_info_title">Minutes this week</string>
+    <!-- One idea: what is counted. -->
+    <string name="home_hero_info_body">Every session from Monday to today, added up. The count starts again each Monday.</string>
+    <string name="home_chart_title">Each day</string>
+    <string name="home_chart_hint">Tap a day to read it</string>
+    <!-- %1$s is the full day name, %2$d its minutes. Announced as the finger moves. -->
+    <string name="home_chart_readout">%1$s · %2$d min</string>
+    <string name="home_sessions_title">Sessions</string>
+    <string name="home_sessions_clear">Clear</string>
+    <string name="home_clear_title">Clear the sample sessions?</string>
+    <string name="home_clear_body">They leave this list and the week\'s total. You can bring them back from the empty list.</string>
+    <string name="home_clear_confirm">Clear</string>
+    <string name="home_clear_keep">Keep them</string>
+    <!-- Empty state: what will appear here, and how. Never fake numbers. -->
+    <string name="home_empty_title">No sessions yet</string>
+    <string name="home_empty_body">Finish a session and it lands here with its day and its minutes.</string>
+    <string name="home_empty_action">Bring back the samples</string>
+
+    <!-- Sample content. Replace with real data. Titles wrap in the list and on the Detail page;
+         the last one is deliberately long (DemoData.LONG_TITLE_ID, TextFitTest). -->
+    <string-array name="demo_session_titles">
+        <item>Morning loop</item>
+        <item>Lunch walk</item>
+        <item>Stretch</item>
+        <item>Long ride</item>
+        <item>Quick reset</item>
+        <item>Weekend hike</item>
+        <item>Sunday hill repeats with a slow recovery jog home</item>
+    </string-array>
+
+    <!-- Detail. -->
+    <string name="detail_saved">Saved on this phone</string>
+    <string name="detail_minutes_label">Minutes</string>
+    <string name="detail_body">Swipe from the edge or tap Back to return. The title flies back into its row.</string>
+    <!-- A link to a session that no longer exists: say what happened and the one move left. -->
+    <string name="detail_missing_title">This session isn\'t here any more</string>
+    <string name="detail_missing_body">It was cleared from this phone. Go back to see the sessions you have.</string>
+    <string name="detail_missing_action">Go back</string>
+
+    <!-- Settings. -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_appearance_info_title">Appearance</string>
+    <string name="settings_appearance_info_body">System follows your phone\'s dark theme and switches when it does. Light and Dark stay as you set them.</string>
+    <string name="theme_system">System</string>
+    <string name="theme_system_hint">Follows your phone\'s dark theme</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_light_hint">Always light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_dark_hint">Always dark</string>
+    <!-- Advisory, inline above the settings it concerns. Problem, fix, and the wrong cause ruled out. -->
+    <string name="settings_motion_off_title">Animations are off on this phone</string>
+    <string name="settings_motion_off_body">Screens change without moving. To see the motion, turn off Remove animations in Accessibility settings. The app isn\'t broken.</string>
+    <string name="settings_motion_off_action">Open Accessibility settings</string>
+</resources>

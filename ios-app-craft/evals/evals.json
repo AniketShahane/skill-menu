@@ -1,0 +1,59 @@
+{
+ "skill_name": "ios-app-craft",
+ "evals": [
+  {
+   "id": 1,
+   "prompt": "let's start a new ios app — a habit tracker in swiftui with four tabs (today, habits, stats, settings), a detail page per habit, and it needs to feel really smooth. set up the project properly and get the skeleton running in the simulator, with tests.",
+   "expected_output": "Starts from templates/scripts/new-app.sh (renamed starter that builds and passes its smoke test) rather than hand-assembling files. Setup before screens: checks xcode-select and exports DEVELOPER_DIR; XcodeGen project.yml from the starter with app, unit and UI test targets, a Release motion scheme without debugger, Secrets xcconfig pattern and CADisableMinimumFrameDurationOnPhone in the Info.plist (verified in the built app); a private simulator created and targeted by id. Architecture: a Foundation-only Swift package for habit logic with swift test; one @MainActor @Observable app model; services behind protocols with fakes; its own navigator; a kept-alive tab pager (templates/app/KeptTabPager.swift) with tabPageShown; MotionKit tokens and a reduced-motion switch; LaunchHooks for reset/seed/pinned clock/deep links. Tests: AppUITestCase base on day one, run-ui-tests.sh with per-test caps, a first journey and a screenshot tour. FrameProbe wired but off by default. Shows the app to the user in the simulator with seeded data via SIMCTL_CHILD_ and DeviceHub. Starts lessons-log entries for anything surprising.",
+   "files": []
+  },
+  {
+   "id": 2,
+   "prompt": "some pages in my swiftui app feel janky — switching tabs stutters, the detail page kind of pops in, and a sheet jumps height when it opens. can you make it buttery smooth, 120fps?",
+   "expected_output": "Measures before fixing: wires FrameProbe (frame log, touch log, status-bar beacon), writes a MotionTestCase journey covering every moment, runs motion-check.sh (Release, 3 runs, median) and reads per-moment motion hitch, response stall, pops, late and settle. Checks CADisableMinimumFrameDurationOnPhone first. Diagnoses with the loop (app frame gaps vs finger lift, video episodes, frame strips picked by pts), then fixes by cause: kept-alive pages and mount-then-move for tab stutter; transitions/withAnimation for pop-ins and 0.001 pre-draw for late rasterisation; measured-height sheet detents animated; Animatable ViewModifier/GeometryEffect instead of rebuilding bodies; no conditional content in modifiers. Changes one cause at a time, re-measures, sets budgets and a baseline from a 3-run median, never loosens a budget to pass, reports per-run numbers and states that the simulator runs at 60 Hz (device verification with Instruments).",
+   "files": []
+  },
+  {
+   "id": 3,
+   "prompt": "on android when you tap an activity card, the map and the numbers fly from the card into the detail page. on ios we just have the zoom transition. make ios do exactly what android does — it's the signature of the app.",
+   "expected_output": "Treats it as product, not polish, and does not keep the native zoom as a substitute. Reads the Android mechanics first (keys/scope, per-part kinds, timings, fades, corners, z-order, after-pieces, bar, back). Builds it per references/shared-element-flights.md, adapting examples/card-pieces: the detail page in an overlay layer above the NavigationStack; a flight layer drawing both ends of each piece from looks built with the real views' code, laid out at their own size and scaled into the live frame; one linear clock handed down through the environment; pieces hidden at 0.001; only the flying card depends on flight state; the clock starts after the flight layer's onAppear; map looks drawn from cached renders; a predictive-back edge swipe; accessibility, escape and back refusal handled. Adds journey moments (open per list form, open again, back by button and swipe, from scrolled), verifies t=0 and landing pixel-identical with frame strips against the Android slow-motion strips, and gets motion hitch 0 with no pops.",
+   "files": []
+  },
+  {
+   "id": 4,
+   "prompt": "my xcuitests fail after i moved the detail page into an overlay — 'home_list still exists' even though the detail page is on top, and a tap on a button near the bottom switches tabs instead. is the app broken?",
+   "expected_output": "Explains that XCUITest reads UIKit automation elements, which include views hidden from VoiceOver; a ScrollView keeps its own element; the nearest accessibilityHidden wins and a .contain container decides for itself; NavigationStack modifiers don't reach UIKit-hosted pages. Fixes the app side by hiding each page and container while covered (and posting screenChanged at still moments), and fixes the tests to assert reach (hittable == false via XCTNSPredicateExpectation) rather than existence. For the tab switch: the control sat under the floating bar and XCUITest tapped through to the bar; reveal the control clear of floating bars before tapping, as a thumb would. Runs the affected suites, then the full suite.",
+   "files": []
+  },
+  {
+   "id": 5,
+   "prompt": "port our android app (kotlin + compose, in app/) to ios with full parity — same screens, same logic, same animations, tested end to end. don't touch the android app.",
+   "expected_output": "Separate worktree and branch; the Android tree read-only (stated in every brief, checked with a three-dot git diff --stat before finishing). P1 read-only reference, in parallel with the P2 core: UI-SPEC docs with exact tokens, motion constants from code, reference screenshots and slow-motion captures, seed data. Pure core ported file-for-file with the original tests at the same numbers, and byte-compatible persistence (port the serializer). Contracts landed before fan-out; parallel agents each with a worktree, private simulator, DerivedData and a shared brief; generated project; one owner per shared file; merges in dependency order with builds between. Platform gaps decided and written into the README. Compose-to-SwiftUI mapping for motion (signature transitions ported, not swapped). Deterministic UI tests with ported names, journeys, screenshot tours; the motion rig and budgets; the app shown to the user; secrets scanned before pushing; retro into this skill.",
+   "files": []
+  },
+  {
+   "id": 6,
+   "prompt": "we just finished the ios app. anything we should save from this project for next time?",
+   "expected_output": "Runs the retro protocol: gathers the lessons-log entries written during the project plus a transcript scan for errors, reverts, failed tests and changed budgets; generalises each into an app-agnostic rule with one line of evidence; places it in the right reference (not SKILL.md unless it cost hours or recurred); corrects rules proven wrong; folds reusable code into templates with syntax checks; adds an eval for each new failure mode; writes a CHANGELOG entry and commits in the skill folder; keeps SKILL.md under ~250 lines; marks log entries as promoted.",
+   "files": []
+  },
+  {
+   "id": 7,
+   "prompt": "new ios app idea: a recipe app. home is a feed of recipe cards (photo, title, time and calories). when you tap a card i want the photo, the title and the little stats to fly off the card and land in their spots on the recipe page — like a proper shared element, super smooth. no android version, nothing to copy from. build it and let me try it in the simulator.",
+   "expected_output": "Picks card pieces from the transition table (several parts landing in different places), not the native zoom, and says the cost. Starts from new-app.sh and templates/app/CardFlight/ rather than examples/card-pieces (which does not compile alone). Names the parts (photo = surface, title = text, stats = panel) and keeps the default timings, stated as Android-derived defaults. Keeps the engine rules: page in an overlay layer, looks from the real views' builders at their own size, clock read in body and started after the flight layer's onAppear, 0.001 hides, flyingId-first, retiring page, back button and edge swipe, accessibility hiding and screen-change posts at still moments. Photos are decoded and cached before the flight (mount then move). Adds motion journey moments (open, open again, back, swipe back, back from scrolled) with budgets, runs motion-check.sh (3 runs, median) and reports 0 pops and hitch numbers. With no reference, gates the flight with frame_strip.py diffs: the first flight frame equals the feed before the tap and the landing frame equals the settled page. UI tests check reach (waitUnreachable), not existence. Shows the app in the simulator and states what the simulator can't show (120 Hz).",
+   "files": []
+  },
+  {
+   "id": 8,
+   "prompt": "can you make the photo on the gallery grid expand into the full-screen viewer when tapped? right now it just pushes.",
+   "expected_output": "Chooses the native zoom (.matchedTransitionSource + .navigationTransition(.zoom)) from the transition table: one surface growing into its page, an hour of work, with the system back swipe. Does not build a custom card-pieces layer for a single surface. Scopes the source ids to the shown page (kept tabs hold hidden copies). Pre-decodes the full image before the transition starts so nothing arrives mid-flight. Measures the moment with the motion rig if it exists, and checks the first and last frames.",
+   "files": []
+  },
+  {
+   "id": 9,
+   "prompt": "the app works but it looks kind of plain and cheap next to apple's apps. can you make it feel premium?",
+   "expected_output": "Reads references/premium-feel.md and runs its premium review checklist on each screen (light and dark, the largest text size, Reduce Motion, VoiceOver, empty/loading/error states, one-handed reach) before changing anything, and reports what failed. Fixes with the system's own tools: Dynamic Type text styles and @ScaledMetric, semantic colour roles in the asset catalog, an 8 pt spacing grid, SF Symbols with symbol effects matched to text weight, sensoryFeedback used sparingly, Liquid Glass through native bars or glassEffect with iOS 18 fallbacks, skeletons instead of spinners, numbers with numericText transitions. Keeps motion rules (nothing appears from nowhere) and re-runs motion-check.sh so polish does not cost frames. Asks before replacing a custom signature element with a system one.",
+   "files": []
+  }
+ ]
+}

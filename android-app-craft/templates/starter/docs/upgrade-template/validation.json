@@ -1,0 +1,47 @@
+{
+  "recordedAtUtc": "2026-01-01T00:00:00+00:00",
+  "version": "0.1.0",
+  "versionCode": 1,
+  "branch": "main",
+  "commit": "<short sha>",
+  "apk": "dist/starter-0.1.0.apk",
+  "apkSha256": "<sha256 of the APK actually installed; debug builds are not byte-reproducible>",
+  "build": "release: R8 minified, resources shrunk, not debuggable, signed with the local debug key; installed with scripts/install-phone.sh and compiled ahead of time (cmd package compile -m speed -f)",
+  "jvm": {
+    "tests": 0,
+    "failed": 0,
+    "skipped": 0,
+    "skippedReason": "<why, or remove>",
+    "newTests": "<ClassName: n, or remove>"
+  },
+  "lint": {
+    "debug": { "errors": 0, "warnings": 0 },
+    "release": { "errors": 0, "warnings": 0 }
+  },
+  "emulator": {
+    "avd": "<this project's AVD name>",
+    "serial": "emulator-<APP_EMULATOR_PORT>",
+    "build": "debug",
+    "classes": {
+      "NavigationFlowTest": { "tests": 1, "passed": true },
+      "TextFitTest": { "tests": 1, "passed": true },
+      "MotionClockTest": { "tests": 4, "passed": true }
+    },
+    "tests": 6,
+    "note": "<every re-run and every test-side fix, stated plainly; e.g. 'TextFitTest failed once on a label that wrapped at 2.0x; fixed in the layout and re-run'>"
+  },
+  "phone": "not installed; the phone was not connected",
+  "phoneExample_whenMeasured": {
+    "device": "<model class, Android version, resolution, refresh rate — no serial>",
+    "tour": "scripts/measure-frames.sh",
+    "gfxinfo": {
+      "before-<prev>-<buildtype>": { "frames": 0, "jankyPercent": 0.0, "p50ms": 0, "p90ms": 0, "p95ms": 0, "p99ms": 0, "slowUiThread": 0, "missedVsync": 0 },
+      "after-<this>-release": { "frames": 0, "jankyPercent": 0.0, "p50ms": 0, "p90ms": 0, "p95ms": 0, "p99ms": 0, "slowUiThread": 0, "missedVsync": 0 }
+    },
+    "refreshRate": "<the display mode active during every tour, from dumpsys display>"
+  },
+  "talkback": "not run on 0.1.0",
+  "notDone": [
+    "<each thing this version did not prove, e.g. 'the hero transition at 120 Hz on the phone'>"
+  ]
+}

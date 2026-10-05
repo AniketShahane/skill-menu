@@ -1,0 +1,5 @@
+// Build settings for the app target (see project.yml configFiles). Keys are optional: copy
+// Secrets.example.xcconfig to Secrets.xcconfig (gitignored) and fill it in. The empty default
+// below keeps a clean checkout building; the app must work, or say why not, without the key.
+API_KEY =
+#include? "../Secrets.xcconfig"
