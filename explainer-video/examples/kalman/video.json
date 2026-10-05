@@ -1,0 +1,60 @@
+{
+  "title": "Kalman filters, from the ground up",
+  "scenes": [
+    {
+      "file": "s1_hook.py",
+      "class": "S1Hook",
+      "title": "The problem"
+    },
+    {
+      "file": "s2_belief.py",
+      "class": "S2Belief",
+      "title": "A belief is a bell curve"
+    },
+    {
+      "file": "s3_combine.py",
+      "class": "S3Combine",
+      "title": "Combining two beliefs"
+    },
+    {
+      "file": "s4_gain.py",
+      "class": "S4Gain",
+      "title": "The Kalman gain"
+    },
+    {
+      "file": "s5_predict.py",
+      "class": "S5Predict",
+      "title": "Time: the prediction step"
+    },
+    {
+      "file": "s6_demo.py",
+      "class": "S6Demo",
+      "title": "Tracking the cart"
+    },
+    {
+      "file": "s7_hidden.py",
+      "class": "S7Hidden",
+      "title": "Learning what you can't see"
+    },
+    {
+      "file": "s8_equations.py",
+      "class": "S8Equations",
+      "title": "The general equations"
+    },
+    {
+      "file": "s9_closing.py",
+      "class": "S9Closing",
+      "title": "When it's optimal, and where it's used"
+    }
+  ],
+  "voice": {
+    "backend": "gemini",
+    "model": "gemini-3.8-flash-tts",
+    "voice": "Charon",
+    "style": "a warm, curious teacher explaining to one friend: unhurried, clear, gently enthusiastic, with natural pauses at commas and full stops",
+    "verify": true,
+    "fallback_to_say": false
+  },
+  "pause_after_line": 0.45,
+  "background": "#0E1117"
+}
