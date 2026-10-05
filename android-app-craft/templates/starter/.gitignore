@@ -1,0 +1,47 @@
+# Gradle and Kotlin
+.gradle/
+.kotlin/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Local machine configuration: SDK path, upload-key fields, API keys.
+local.properties
+
+# Per-project emulator, logs, frame dumps, traces, phone backups (scripts/ write here).
+.tools/
+# Builds handed to the phone, and agent worktrees.
+dist/
+.claude/worktrees/
+
+# Build outputs that can land outside build/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+out/
+
+# Keystores never enter the repository.
+*.jks
+*.keystore
+
+*.log
+*.hprof
+
+# IDE and OS
+.idea/
+*.iml
+.navigation/
+captures/
+.externalNativeBuild/
+.cxx/
+.DS_Store
+
+# The committed baseline profiles live at <module>/src/release/generated/baselineProfiles/
+# (`saveInSrc = true`); `assemble*` packages whatever is checked in there. A bare `release/`
+# rule above would match only those directories and silently ship an ART profile with zero
+# app classes, which is what happened to Flick (flick@50a7a9a). Git cannot re-include a file
+# whose parent directory is excluded, so the directory is un-ignored before its contents.
+# Keep these two lines LAST so no later rule can re-exclude them.
+!**/src/release/
+!**/src/release/**

@@ -1,0 +1,65 @@
+{
+  "skill_name": "android-app-craft",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "let's start a new android app — a plant watering tracker in kotlin + compose, material 3 expressive, with a today tab, a plants tab, settings, and a detail page per plant. i want it to look and feel as good as dash. set it up properly, get it running on the emulator, with tests.",
+      "expected_output": "Reads lessons-log.md and CHANGELOG.md first. Scaffolds from templates/starter with templates/new-app.sh (not a blank Android Studio project), sources scripts/android-env.sh (JDK 21), notes the first build must be online, builds :app:assembleDebug and runs :app:testDebugUnitTest green before changing screens. Derives a direction from the subject before touching tokens (a one-sentence thesis, one or two hero moments, the counterfactual test; links android-design for the method) and replaces the starter's placeholder palette, faces and corners, keeping PaletteContrastTest and ThemePlateTest green (designed dark set, not an inversion). Extends NavMotion's routes and its JVM tests for the new tabs and detail; uses Reveal/RevealSession, AnimatedNumber and draw-phase reads. Starts its own AVD with scripts/start-emulator.sh and guards scripts to that emulator. Writes CLAUDE.md from the template (one Gradle runner, strings.xml, orchestration). Measures nothing on debug; says so. Logs anything surprising in lessons-log.md.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "my compose app's tab switches stutter on my pixel and the list feels choppy when i scroll. can you make it smooth at 120hz?",
+      "expected_output": "First checks what is installed: dumpsys package flags for DEBUGGABLE. Builds release (R8, debug-key signed), installs with install -r (never uninstall), runs cmd package compile -m speed -f or a baseline profile, then measures a fixed tour with scripts/measure-frames.sh and classifies janky frames with frame-classify.py (late start / UI thread / RenderThread / GPU) before changing code. Fixes by cause: per-frame values moved into graphicsLayer/drawBehind/drawWithCache lambdas; whole-page fades replaced by an opaque slide plus one flat drawRect dim; entrances limited to once per page identity; lazy keys + contentType + cache window; bitmaps sized to their box; preferredFrameRate(High) on the nav host. Does not retune springs as the fix. Does not judge timing on the emulator. Reports before/after numbers from the same tour and per-run variance, and records the change in the version's release notes.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "when i tap a card in the list i want it to fly into its detail page — the image grows into the header, the title moves into place, the rest of the page comes in after. like dash does with runs.",
+      "expected_output": "Reads references/navigation-and-shared-elements.md and examples/sample/ui/AppNavigation.kt + NavMotion.kt. One motion per navigation: the route pair becomes MORPH in NavMotion (no page slide at the same time). Pieces keyed with NavMotion.sharedKey namespaced by page pair and fixed from first composition; image as sharedBounds, same-text as scaleToBounds(FillWidth), different text crossfading at full line width; only the page's end fades, fades done with ModulateAlpha rather than sharedBounds enter/exit; named visibility threshold; skipToLookaheadSize and a remembered in-flight lambda; floating bar lifted into the overlay; bounds finish inside the container; page-only content arrives at PIECES/2 + i*55. Adds NavMotionTest invariants. Records a contact sheet with scripts/record-transition.sh and checks the frames; checks the same key never exists on two surfaces at once (the Marginalia crash).",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "honestly the app looks like a generic compose sample — purple buttons, the same cards everywhere, roboto. give it a real identity, and do dark mode properly too.",
+      "expected_output": "Loads android-design for the taste method and this skill for the concrete layer. Derives a thesis from the product's subject (Dash and Flick as worked examples in references/design-direction.md), names the one hero surface. Builds the three-layer theme: a job-named palette in a static CompositionLocal, projected into a ColorScheme, inside MaterialExpressiveTheme; a separately designed dark set; brand step-outs pinned across themes; dynamic color off or confined to quiet containers. Bundles a display face + body face (+ mono if numbers change) as static TTFs with OFL licences, warms them off-thread, sets all 30 roles incl. emphasized, tnum on changing numbers, pinned tracking. Named corner and spacing scales. Contrast/elevation JVM tests and a cold-start plate test go green. Screens touch no hex and no literal dp. Checks both themes on the emulator at font scale 1 and 2.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "i'm adding an android tv version. the d-pad focus is basically invisible on the tv and sometimes focus just disappears after i delete something from a list.",
+      "expected_output": "Uses references/tv.md and examples/flick/receiver/TvFocus.kt. A detached, painted focus ring (2 dp, 4.5 dp outside, dark contour) placed after the scale layer and before the clip so focusing never reflows; 1.06 focus scale on spring damping >= 0.85; one focus owner per group (beacon host per group, not per screen); landTvFocus retrying for 4 frames before a fallback; a planned focus landing after delete (row below, row above, pane back) never 'nowhere'; overscan-safe chrome with a focus-ring reserve on a 960x540 dp canvas; ten-foot type floors with slightly positive tracking; D-pad keys not swallowed at Activity level. Adds a focus-walk test that asserts exactly one focused control per step and that its paint stays inside the safe area, including at fontScale 2.",
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "put the latest build on my phone",
+      "expected_output": "Treats the phone as production data. Builds the R8 release (signed with the debug key so install -r keeps data), finds the phone via scripts/android-env.sh (APP_PHONE_SERIAL or discovery, never a hardcoded serial, never the emulator), refuses if a live session is running, takes a run-as backup only while the installed build is still debuggable, runs install -r (never uninstall or clear data), then cmd package compile -m speed -f and prints dexopt status. Launches and checks the app is resumed before any tap; taps from uiautomator bounds, not guessed coordinates. Records phone-install.json (versions before/after, apk sha256, data byte-identical) without committing personal screenshots.",
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "we're wrapping up this app. update the android skill with what we learned so the next app goes better.",
+      "expected_output": "Runs the retro protocol from SKILL.md: collects raw lessons-log entries plus a scan of the session for errors, reverts, failed tests and changed numbers; rewrites each as a rule for any app with one line of evidence; places it in the right reference (not SKILL.md), promoting to 'Rules that cost the most' only if it cost hours or recurred across apps and demoting to keep the list at about 15; fixes wrong rules in place and logs 'corrected <date>'; folds reusable code into templates/starter and proves it with new-app.sh + assembleDebug + testDebugUnitTest; refreshes examples/ copies and their commit hashes if the source moved; adds an eval for each new failure mode; adds a CHANGELOG entry; keeps SKILL.md under ~250 lines. Does not edit android-design beyond its pointer; records disagreements in android-design-corrections.md.",
+      "files": []
+    },
+    {
+      "id": 8,
+      "prompt": "the layout inspector shows my home screen recomposing a lot. can you add remember and derivedStateOf everywhere to cut it down?",
+      "expected_output": "Measures before changing anything: release build, frame numbers on the phone. If frames are inside budget and the recompositions track real data changes, says so and does nothing (recomposition tracking real change is the system working; strong skipping compares by identity). If frames are late, attributes them first (frame-classify, Perfetto) and fixes the specific cause — a per-frame value read in composition, a new instance of the same logical value each pass, an entrance replaying — rather than blanket remember/derivedStateOf. Reports the before/after numbers.",
+      "files": []
+    },
+    {
+      "id": 9,
+      "prompt": "add a 'stats' tab to the app, and let the habit detail page open from both the today tab and the habits tab with the card flying into it like it does from today.",
+      "expected_output": "Follows the add-a-tab and add-a-page checklist in navigation-and-shared-elements.md: adds the route to Route and Route.tabs (the single tab list the glass bar derives from), key/encode/decode, a bar label string in strings.xml and an AppIcons glyph, NavMotion.showsCards for both card pages, Tags. Shared keys take the opener's scope so Detail builds the same key whichever card page opened it; adds the JVM test that card end and page end produce equal keys for every card page, extends NavMotionTest journeys and NavigatorTest, and finds tabs by tag or label (never index) in NavigationFlowTest. Builds, runs unit tests, and checks the flight from both tabs in a contact sheet rather than trusting green tests.",
+      "files": []
+    },
+    {
+      "id": 10,
+      "prompt": "the habits need to actually be saved now — right now it's all sample data. set up storage so nothing gets lost when i update the app on my phone.",
+      "expected_output": "Uses references/data-and-state.md: one repository per aggregate with a synchronous cache plus a suspending load (replacing DemoData's shape, not the screens' contract), screens receive state as parameters or lifecycle-collected flows; picks files/prefs vs DataStore vs Room with the reason (and what Dash, Flick and Marginalia chose); atomic writes (tmp + rename) with a format version and an upgrade test from an old-format fixture; backup rules checked by a test against the real XML; dates and streaks computed in the user's zone; seed data kept for screenshots and tests. Adds any new dependency to the pinned catalog with a reason comment and a full build. Installs over the existing build with install -r and proves the user's data survived (phone-install.json, byte-identical files).",
+      "files": []
+    }
+  ]
+}

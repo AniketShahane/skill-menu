@@ -6,6 +6,32 @@ On the menu:
 
 - **Ask Queue** (new): turns asks from Slack, Jira, Zoom and Gmail into cards in your own Slack DM, asks only what it can't work out, and prepares drafts you read and send. It learns from every ask. Built to replace Working Memory.
 - **Working Memory**: a daily planning ritual with a live visual board.
+- **Android App Craft** (new): build native Android apps (Kotlin + Compose, Material 3 Expressive) that look and move like a premium app. Comes with a starter app that builds and passes its tests.
+- **iOS App Craft** (new): the same for SwiftUI on iOS, including porting an Android app. Comes with a starter app and a card-to-page flight engine.
+
+---
+
+## What the app-craft skills do
+
+Two sister skills, distilled from shipped apps (a running app and a phone-to-TV casting app). They load on their own when you ask your agent for Android or iOS app work.
+
+- **A playbook.** `SKILL.md` gives the workflow and the rules that cost the most to learn. `references/` covers theme and type, motion, page transitions and shared elements, components, testing, performance and delivery. Every rule carries the measurement or bug behind it.
+- **A starter app.** `templates/new-app.sh` copies a small app that already has the theme, motion system, navigation, tests and device scripts, renamed to your app.
+- **Worked examples.** `examples/` shows the techniques in full files. The casting app's files are copied from its public repo; the rest are generic rewrites of code from a private app.
+- **A learning loop.** `lessons-log.md` collects what went wrong during a project. At the end, say "update the android skill with what we learned" (or the iOS one) and it folds the lessons into the guides.
+
+### Install
+
+```bash
+git clone https://github.com/AniketShahane/skill-menu.git
+cd skill-menu
+mkdir -p ~/.claude/skills
+cp -R android-app-craft ios-app-craft ~/.claude/skills/
+```
+
+Then ask for an app, e.g. "start a new android app: a plant watering tracker". Android needs JDK 21 and the Android SDK; iOS needs Xcode and XcodeGen.
+
+`android-app-craft` points to an older taste-level skill, `android-design`, for design method. It isn't in this repo. The Android skill works without it, and its `references/android-design-corrections.md` lists where the two disagree.
 
 ---
 
@@ -129,6 +155,8 @@ skill-menu/
     references/       # sweep / replies / cards / learn / setup
     scripts/          # aq.mjs (state), guard.mjs (safety hook), run.sh (cron), doctor.sh, install.sh
     templates/memory/ # seed memory files
+  android-app-craft/ # Kotlin + Compose playbook, starter app, examples
+  ios-app-craft/     # SwiftUI playbook, starter app, examples
   working-memory/
     SKILL.md          # the skill definition your agent reads
     references/       # standup / shutdown / setup flows

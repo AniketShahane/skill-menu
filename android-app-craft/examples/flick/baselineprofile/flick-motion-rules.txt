@@ -1,0 +1,29 @@
+# Hand-written: the profile generator cannot reach a cast, so the stage and playback
+# motion would otherwise run JIT on the first cast after install. Merged with the
+# generated profile; regenerate that on the TV with :receiver:generateReleaseBaselineProfile.
+HSPLcom/flick/receiver/ui/components/HouseLightsKt;->**(**)**
+HSPLcom/flick/receiver/ui/components/DisplayCadenceKt;->**(**)**
+HSPLcom/flick/receiver/ui/components/PresenceKt;->**(**)**
+HSPLcom/flick/receiver/ui/components/SwapKt;->**(**)**
+HSPLcom/flick/receiver/ui/components/InkKt;->**(**)**
+HSPLcom/flick/receiver/ui/components/TvScrubBarKt;->**(**)**
+HSPLcom/flick/receiver/ui/components/TransportKt;->**(**)**
+HSPLcom/flick/receiver/ui/components/GlassPanelKt;->**(**)**
+HSPLcom/flick/receiver/ui/components/FlickLoaderKt;->**(**)**
+HSPLcom/flick/receiver/ui/components/SpecChipKt;->**(**)**
+HSPLcom/flick/receiver/ui/screens/PlaybackScreenKt;->**(**)**
+HSPLcom/flick/receiver/ui/screens/StreamMetricsPanelKt;->**(**)**
+HSPLcom/flick/receiver/ui/screens/SubtitlesPanelKt;->**(**)**
+HSPLcom/flick/receiver/ui/screens/OrientationPanelKt;->**(**)**
+# A bare class rule only preloads; the stage's coroutine and lambda classes need a
+# method part to be compiled. One `*` also matches deeper `$` nesting.
+HSPLcom/flick/receiver/ui/components/HouseLightsKt$*;->**(**)**
+HSPLcom/flick/receiver/ui/screens/PlaybackScreenKt$*;->**(**)**
+HSPLcom/flick/receiver/ui/components/TvScrubBarKt$*;->**(**)**
+HSPLcom/flick/receiver/ui/components/DisplayCadenceKt$*;->**(**)**
+HSPLcom/flick/receiver/ui/components/PresenceKt$*;->**(**)**
+HSPLcom/flick/receiver/ui/components/TransportKt$*;->**(**)**
+HSPLcom/flick/receiver/ui/components/GlassPanelKt$*;->**(**)**
+HSPLcom/flick/receiver/ui/components/InkKt$*;->**(**)**
+# The display-mode listener is its own top-level class, not nested under DisplayCadenceKt.
+HSPLcom/flick/receiver/ui/components/DisplayModeCadence;->**(**)**

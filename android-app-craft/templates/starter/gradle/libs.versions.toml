@@ -1,0 +1,105 @@
+# Every pin carries its reason. Change a pin only with the reason updated in the same edit:
+# these versions are a set that is known to build together (Flick, Sep 2026), not a list of
+# "latest". The fallback set for a project that must stay on AGP 8 is in
+# references/setup-and-tooling.md (Dash's: AGP 8.10.1, Kotlin 2.1.21, material3 alpha18).
+
+[versions]
+# --- Build tooling (one mutually compatible set) ---
+# AGP 9.3.0 is the first line here that compiles against SDK 37, which material3 1.5.0-alpha19+
+# and Haze 1.7.3+ require. It needs Gradle 9.5.0 (gradle/wrapper) and a JDK 17+ launcher; use
+# JDK 21 (scripts/android-env.sh). AGP 9 has Kotlin built in: no org.jetbrains.kotlin.android.
+agp = "9.3.0"
+# Pins only the Compose compiler plugin (org.jetbrains.kotlin.plugin.compose); AGP 9 supplies
+# Kotlin support itself. 2.3.21 with AGP 9.3.0 is the pair Flick builds with.
+kotlin = "2.3.21"
+
+# --- SDK levels ---
+# 37 because the Expressive material3 alphas and Haze 1.7.3+ refuse to compile below it.
+compileSdk = "37"
+# 26 is both apps' floor: adaptive icons, and the navigation-bar light-icon flag the
+# edge-to-edge window relies on.
+minSdk = "26"
+# 36 is Play's requirement for new apps and updates from 31 Aug 2026
+# (flick:docs/play-release.md, technical requirements).
+targetSdk = "36"
+# ART profiles can only be dumped from API 28, so the profile producer cannot go lower.
+baselineProfileMinSdk = "28"
+
+# --- AndroidX runtime ---
+# Flick's proven set on this toolchain.
+coreKtx = "1.16.0"
+activityCompose = "1.10.1"
+lifecycle = "2.9.0"
+# The BOM aligns ui/foundation/animation. material3 is pinned apart from it below, and its
+# alpha pulls the whole Compose family forward to 1.12.0-beta01; the BOM still fixes the
+# versions of anything material3 does not touch.
+composeBom = "2026.06.01"
+# M3 Expressive (MaterialExpressiveTheme, MotionScheme) exists only in the 1.5.0 alphas.
+# alpha19+ needs compileSdk 37 and Compose 1.12; alpha24 is what Flick ships. Moving to a newer
+# alpha is a deliberate upgrade with a full emulator pass, not a routine bump.
+material3 = "1.5.0-alpha24"
+# Frosted glass. 1.7.2 is what both apps ship; 1.7.3+ also needs compileSdk 37, which this set
+# has, so 1.7.3 is allowed once someone has built and looked at it (dash:docs/upgrade-0.9.4).
+haze = "1.7.2"
+
+# --- AOT compilation ---
+# Required, not preferred: the 1.4.x baseline-profile plugin caps AGP below 9.0.0-alpha01, and
+# 1.5.0-alpha07 raises that to 10.0.0-alpha01. The plugin and benchmark-macro-junit4 must stay on
+# the same version (flick:gradle/libs.versions.toml:29-33).
+androidxBenchmark = "1.5.0-alpha07"
+# Hands the packaged baseline profile to ART on first run; without it a bundled profile is inert
+# below API 31.
+profileinstaller = "1.4.1"
+
+# --- Optional composition tracing (-PappTracing=true) ---
+# Dash's version; the receiver it registers is what scripts/trace-phone.sh broadcasts to.
+tracingPerfetto = "1.0.0"
+
+# --- Tests ---
+junit = "4.13.2"
+androidxTestCore = "1.6.1"
+androidxTestExtJunit = "1.2.1"
+androidxTestRunner = "1.6.2"
+androidxTestRules = "1.6.1"
+# 2.4.0 is the line benchmark 1.5.0-alpha07 resolves with (flick:CLAUDE.md:30-33).
+uiautomator = "2.4.0"
+
+[libraries]
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
+androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
+
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
+androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
+androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
+androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation" }
+androidx-compose-animation = { group = "androidx.compose.animation", name = "animation" }
+androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3" }
+haze = { group = "dev.chrisbanes.haze", name = "haze", version.ref = "haze" }
+
+androidx-profileinstaller = { group = "androidx.profileinstaller", name = "profileinstaller", version.ref = "profileinstaller" }
+# Only the :baselineprofile producer consumes this.
+androidx-benchmark-macro-junit4 = { group = "androidx.benchmark", name = "benchmark-macro-junit4", version.ref = "androidxBenchmark" }
+
+# Version from the BOM, so it tracks the Compose runtime.
+androidx-compose-runtime-tracing = { group = "androidx.compose.runtime", name = "runtime-tracing" }
+androidx-tracing-perfetto = { group = "androidx.tracing", name = "tracing-perfetto", version.ref = "tracingPerfetto" }
+androidx-tracing-perfetto-binary = { group = "androidx.tracing", name = "tracing-perfetto-binary", version.ref = "tracingPerfetto" }
+
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
+androidx-test-core-ktx = { group = "androidx.test", name = "core-ktx", version.ref = "androidxTestCore" }
+androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestExtJunit" }
+androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidxTestRunner" }
+androidx-test-rules = { group = "androidx.test", name = "rules", version.ref = "androidxTestRules" }
+androidx-test-uiautomator = { group = "androidx.test.uiautomator", name = "uiautomator", version.ref = "uiautomator" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-test = { id = "com.android.test", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+androidx-baselineprofile = { id = "androidx.baselineprofile", version.ref = "androidxBenchmark" }

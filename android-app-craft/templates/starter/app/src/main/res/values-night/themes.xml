@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The dark plate, painted before this process runs, out of whatever night mode the SYSTEM
+      resolves for the app. A pale plate here would flash white before a near-black app.
+
+      Which night mode that is: from API 31 it is the app's own, because ThemeStore hands the
+      in-app choice to UiModeManager.setApplicationNightMode, so a Dark user on a light phone
+      lands here too, from the launch after the choice was made. API 26-30 has no per-app
+      night mode short of AppCompat, so there this stays the phone's answer and AppTheme's
+      window repaint is the first frame the preference owns.
+
+      windowBackground is DarkColors.canvas written out by hand. ThemePlateTest holds the two
+      together.
+    -->
+    <style name="Theme.Starter" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0E0F16</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

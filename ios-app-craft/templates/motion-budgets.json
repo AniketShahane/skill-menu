@@ -1,0 +1,92 @@
+{
+ "note": "Motion budgets, read by scripts/motion_report.py (run by scripts/motion-check.sh). Every number is checked against the median of the runs. 'default' applies to every moment; 'moments' overrides it by the moment names MotionTestCase writes; 'journey' limits the mean over all moments (pops summed). The journey line is tighter because single missed frames on the simulator come and go. 'regression' fails a metric that is worse than motion-baseline.json by more than old * ratio + abs. The analyser ignores every 'note' key. These defaults come from a SwiftUI app measured in the iOS simulator at 60 Hz: 28 moments, journey motion hitch 5.29 ms/s (1.89 without the launch), 0 pops, mean response 52 ms. Tighten them once your app beats them. Never loosen one to pass without a measured reason in moment_notes.",
+ "detector": {
+  "note": {
+   "move_floor": "A frame counts as moving when 0.15% of the screen changes hard, about 100 of the ~70,000 pixels analysed. Under it is noise such as encoder shimmer or a text caret.",
+   "gap_s": "Moving frames less than 60 ms apart (under 4 frames at 60 Hz) are one motion (an episode).",
+   "pop_area": "A pop changes at least 4% of the screen in one frame, about a 120 x 120 pt block on a phone...",
+   "pop_share": "...and that frame carries 70% or more of its episode's change. An animation spreads its change over many frames, even when the recorder squeezes it into a few; a cut puts it all in one.",
+   "late_after_s": "Change after 250 ms of recorded stillness is content arriving late: a map, chart or image filling in after the page landed. Staggered choreography with shorter pauses is not late.",
+   "tail_s": "An episode that starts within 120 ms of a bigger one is that one's tail, split off by a recorder burst, not a new arrival.",
+   "analysis_width": "Frames are scaled to 180 px wide before comparing. That is enough to see a card move and fast to analyse, and the scaling averages away encoder noise.",
+   "hard_change": "A pixel changed hard when its grey level moved by more than 24 of 255. H.264 noise and soft gradients stay under it.",
+   "status_bar_share": "The top 6% of the frame is left out: the status bar clock and FrameProbe's beacon. It must cover FrameProbe.beaconFrame. On a phone with a Dynamic Island the status bar is about 6.2% of the height. Change it for a device or orientation where it is not.",
+   "response_window_s": "A stall within 400 ms of the finger lift is part of the response. A longer freeze still counts in full."
+  },
+  "move_floor": 0.0015,
+  "gap_s": 0.06,
+  "pop_area": 0.04,
+  "pop_share": 0.7,
+  "late_after_s": 0.25,
+  "tail_s": 0.12,
+  "analysis_width": 180,
+  "hard_change": 24,
+  "status_bar_share": 0.06,
+  "response_window_s": 0.4
+ },
+ "default": {
+  "note": {
+   "motion_hitch_ms_per_s": "Apple's hitch time ratio, counted while pixels move. Apple's lines: under 5 good, 5-10 warning, 10 and up critical (WWDC20 10077, 'Eliminate animation hitches with XCTest'). One missed 60 Hz frame in a one-second moment is already 17, and the simulator drops one now and then at random. So a single moment gets one frame of slack; the journey mean holds the real line.",
+   "motion_worst_ms": "The longest frame while pixels move: at most two missed refreshes in a row at 60 Hz (3 x 16.7 ms).",
+   "response_stall_ms": "The pause between the finger lifting and the screen answering. Under 100 ms feels instant. The simulator, answering XCUITest's accessibility reads, costs about a third more than a phone, hence 120.",
+   "pops": "Nothing snaps or appears from nowhere.",
+   "late_pct": "Nothing arrives after the page lands. 5% of the screen leaves room for a small badge or number settling.",
+   "settle_ms": "First moving pixel to last: long enough for a spring, short enough not to drag. Equal to MotionTestCase.settle (1.4 s); flings get MotionTestCase.flingSettle (3.0 s) and 3000. A budget longer than its moment's window can never fail, so keep them equal. A moment still moving when its window closes is flagged in the report's warnings."
+  },
+  "motion_hitch_ms_per_s": 20,
+  "motion_worst_ms": 50,
+  "response_stall_ms": 120,
+  "pops": 0,
+  "late_pct": 5,
+  "settle_ms": 1400
+ },
+ "moments": {
+  "note": "Overrides by moment name. null, or 1000 and up on a metric that is not in ms, means 'not meaningful here': not budgeted, not checked against the baseline, and left out of the journey mean. A duration of 1000 ms or more is a real budget. \"in_journey\": false leaves the whole moment out of the journey mean; use it only for one-off costs like the launch. Loosen a moment only with a measured reason in moment_notes. Example: the session's first open of a page drawn unseen before its flight was allowed 140 ms, since a second open measured under 100.",
+  "launch": {
+   "in_journey": false,
+   "motion_hitch_ms_per_s": 150,
+   "motion_worst_ms": 400,
+   "response_stall_ms": 400,
+   "late_pct": 250,
+   "settle_ms": 8000
+  },
+  "home_scroll": {
+   "late_pct": 1000,
+   "settle_ms": 3000
+  },
+  "detail_scroll": {
+   "late_pct": 1000,
+   "settle_ms": 3000
+  }
+ },
+ "regression": {
+  "note": "A metric fails when new > old * (1 + ratio) + abs. abs 17 is one 60 Hz frame and 25 about one and a half. pops 0/0: any new pop fails. Ratios near 0.5 absorb the simulator's run-to-run noise on small numbers. Tune them from repeated runs of an unchanged build: the tolerance must sit above that noise and below one real regression. A metric with no entry here gets ratio 0.25, abs 1.",
+  "motion_hitch_ms_per_s": {"ratio": 0.5, "abs": 5},
+  "motion_worst_ms": {"ratio": 0.3, "abs": 17},
+  "response_stall_ms": {"ratio": 0.3, "abs": 17},
+  "hitch_ms_per_s": {"ratio": 0.5, "abs": 15},
+  "dropped_pct": {"ratio": 0.5, "abs": 2},
+  "worst_frame_ms": {"ratio": 0.3, "abs": 25},
+  "pops": {"ratio": 0, "abs": 0},
+  "max_jump_pct": {"ratio": 0.5, "abs": 8},
+  "late_pct": {"ratio": 0.5, "abs": 10},
+  "settle_ms": {"ratio": 0.3, "abs": 200}
+ },
+ "journey": {
+  "note": {
+   "motion_hitch_ms_per_s": "The mean over moments, launch left out. 7 is the reference app's line, set when the launch was still counted: 5.29 with it, 1.89 without, since its 97 ms/s launch was 64% of the mean. With the launch out, 7 is loose. Once your baseline is in, tighten toward Apple's 'good' line of 5.",
+   "response_stall_ms": "The mean response, launch left out. Most taps answer within a few frames: the reference app measured 52 with the launch and 43 without.",
+   "pops": "Summed over the journey.",
+   "late_pct": "The mean late area, leaving out moments where late_pct is not meaningful."
+  },
+  "motion_hitch_ms_per_s": 7,
+  "response_stall_ms": 60,
+  "pops": 0,
+  "late_pct": 20
+ },
+ "moment_notes": {
+  "launch": "Process start and the first build of every screen. The loose budgets catch disasters, and the baseline catches drift. Left out of the journey mean.",
+  "harness_idle_tap": "A tap on inert text: nothing moves. Its response_stall_ms is XCUITest's own cost, the floor under every other response number.",
+  "home_scroll": "A fling. Its deceleration after a pause is not late content, so late_pct is not meaningful, and settling takes 2.5-3 s."
+ }
+}

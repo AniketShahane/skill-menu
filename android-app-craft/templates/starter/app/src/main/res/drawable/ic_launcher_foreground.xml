@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PLACEHOLDER mark: a citron ring and dot (the palette's Accent), centred. Everything drawn
+     sits inside a 48 dp circle, well within the 66 dp safe zone of the 108 dp canvas, so no
+     launcher mask (circle, squircle, teardrop) clips it and the parallax shift has room. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#D4F25A"
+        android:strokeWidth="6"
+        android:pathData="M54,33a21,21 0,1 1,0 42a21,21 0,1 1,0 -42z" />
+    <path
+        android:fillColor="#D4F25A"
+        android:pathData="M54,47a7,7 0,1 1,0 14a7,7 0,1 1,0 -14z" />
+</vector>
