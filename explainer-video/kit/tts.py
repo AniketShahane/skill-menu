@@ -10,7 +10,7 @@ CLI (run with the skill venv's python):
 
 Settings come from video.json (searched upward from the working directory), key "voice":
   backend   "gemini" | "say"
-  model     Gemini TTS model, e.g. "gemini-3.8-flash-tts"
+  model     Gemini TTS model: "gemini-3.8-flash-lite-tts" (default, cheaper) or "gemini-3.8-flash-tts" (higher quality)
   voice     Gemini prebuilt voice (e.g. "Charon") or a macOS voice (e.g. "Samantha")
   style     how to read: a short director's note (sent separately from the words)
   wpm       measured speaking rate, used for length estimates (Charon + default style ≈ 120)
@@ -46,7 +46,7 @@ API = "https://generativelanguage.googleapis.com/v1beta"
 PASS = 0.85        # transcript similarity needed to accept a clip
 DEFAULTS = {
     "backend": "gemini",
-    "model": "gemini-3.8-flash-tts",
+    "model": "gemini-3.8-flash-lite-tts",
     "voice": "Charon",
     "style": "a warm, curious teacher explaining to one friend: unhurried, clear, gently enthusiastic, "
              "with natural pauses at commas and full stops",
@@ -270,11 +270,13 @@ def transcribe(wav, cfg, key):
     body = {"contents": [{"parts": [
         {"inlineData": {"mimeType": "audio/wav", "data": base64.b64encode(Path(wav).read_bytes()).decode()}},
         {"text": "Transcribe this audio verbatim. Write numbers as words. Output only the spoken words."}]}]}
-    d = _call_with_retries(f"{API}/models/{cfg['verify_model']}:generateContent", body, key, "verify")
-    try:
-        return d["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except (KeyError, IndexError):
-        raise TTSError("verify: no transcript in response")
+    for _ in range(2):  # the transcriber occasionally returns an empty reply; one retry clears it
+        d = _call_with_retries(f"{API}/models/{cfg['verify_model']}:generateContent", body, key, "verify")
+        parts = (d.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
+        text = " ".join(p.get("text", "") for p in parts if p.get("text") and not p.get("thought")).strip()
+        if text:
+            return text
+    raise TTSError("verify: no transcript in response")
 
 
 # ---------------------------------------------------------------- say
@@ -436,6 +438,13 @@ def cmd_list(files):
         budget = int(tm * wpm * 0.85)
         print(f"TARGET {tm:g} min → narration budget ≈ {budget} words (leaves ~15% for silent beats)"
               + ("  ✓" if total_w <= budget else f"  ✗ cut ~{total_w - budget} words"))
+    # Hard ceiling: videos are capped at max_minutes (default 30). Runtime ≈ speech / 0.85 (pauses, cards, silent beats).
+    cap = float(vid.get("max_minutes", 30))
+    est = total_w / wpm / 0.85
+    if est > cap:
+        print(f"CAP ✗ estimated runtime {est:.1f} min > {cap:g} min ceiling: cut ~{int(total_w - cap * wpm * 0.85)} words")
+        sys.exit(3)
+    print(f"CAP ✓ estimated runtime {est:.1f} min ≤ {cap:g} min ceiling")
 
 
 def cmd_prepass(files):

@@ -14,8 +14,10 @@
   - Transcription noise ("centre"/"center", "cart"/"card") typically scores 0.93–1.0.
 
 ## The Gemini call (as tested Oct 2026)
-- **Model:** `gemini-3.8-flash-tts` (stable). `gemini-3.8-flash-lite-tts` is cheaper.
-  `gemini-2.5-pro-preview-tts` still works.
+- **Model:** default `gemini-3.8-flash-lite-tts` (the user chose it for cost). For a higher-quality
+  final, set `"model": "gemini-3.8-flash-tts"` in video.json; every clip re-voices automatically.
+  `gemini-2.5-pro-preview-tts` also works. The lite model's per-minute rate limit is tighter: expect
+  429 retries on a long prepass, which tts.py waits out.
 - **Preferred path:** the Interactions API (`POST v1beta/interactions`). The style goes in a
   `speech_metadata` annotation, separate from the words:
   ```json
@@ -63,6 +65,26 @@ already drift a little in timbre and energy (observed in our runs and reported o
 makes the drift worse.
 
 ## Quotas, cost, failure
+- **Daily cap (measured 2026-10): Tier 1 allows 100 TTS requests per day *per model*, over a rolling
+  window.** Retakes from the transcript check count too.
+  - A 130-line script needs about 140 requests, so it cannot finish on one model in one day.
+  - Plan before voicing:
+    - give each *character* one model (narrator on one model, the quote voice on another);
+    - never split one character across models: the timbre changes;
+    - or voice over two days;
+    - or get Tier 2 ($100 spend + 3 days, automatic).
+  - `--list` and the cap check cost nothing; run them first.
+  - Measured rates: Charon on gemini-3.1-flash-tts-preview ≈ 121 wpm; Gacrux on gemini-2.5-pro-preview-tts
+    ≈ 110 wpm. The preview/2.5 models had quota left when the 3.8 ones were exhausted.
+- **Transient `finishReason=OTHER` (no audio)** happens. Retry that line; don't let it kill the whole prepass.
+- **Voice consistency (open Google issue, 2026-09-30):** 3.8 TTS can change tone mid-clip on 2–7 min
+  inputs. Keep clips to one line or a short paragraph. Pilot ~20 lines before committing a long script.
+- **Fallbacks if drift or caps bite:**
+  - ElevenLabs: `seed` plus `previous_text`/`next_text` for continuity; character timestamps;
+    ~$1–2 per 30 min.
+  - Local MLX-Audio (Qwen3-TTS, Chatterbox, Kokoro): no limits, a step below Gemini on the arena
+    leaderboards.
+  - Word timings for any engine: WhisperX forced alignment (stable-ts was archived 2026-05).
 - **Rate limits** depend on the key's tier and aren't published per model.
   - `tts.py` retries 429/5xx with the server's `retryDelay`, or exponential backoff.
   - The prepass runs 3 workers. Lower `voice.workers` in video.json if you see many 429s.

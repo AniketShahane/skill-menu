@@ -49,7 +49,7 @@
   ],
   "voice": {
     "backend": "gemini",
-    "model": "gemini-3.8-flash-tts",
+    "model": "gemini-3.8-flash-lite-tts",
     "voice": "Charon",
     "style": "a warm, curious teacher explaining to one friend: unhurried, clear, gently enthusiastic, with natural pauses at commas and full stops",
     "verify": true,

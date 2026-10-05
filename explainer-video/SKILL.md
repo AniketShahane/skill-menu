@@ -1,6 +1,6 @@
 ---
 name: explainer-video
-description: Makes 3Blue1Brown-style animated explainer videos — Manim Community scenes, AI-narrated voice-over (Gemini TTS, macOS say fallback), soft subtitles and chapters, assembled into one mp4 — that teach an idea from its fundamentals up. Use when the user wants a video, animation or narrated visual explanation of a math, science, algorithm or engineering idea ("explainer video", "3b1b style", "Manim", "animate how X works", "make a video explaining X"), even if Manim is never named. Also use to fix, re-time, re-voice or extend an existing explainer ("the label overlaps at 2:31", "the voice runs ahead of the picture"), or for a short silent Manim clip. Covers the fundamentals-ladder script, adversarial fact review, scene code, transcription-verified narration, parallel rendering, frame-level visual QA and final assembly. Not for written explainers or articles, live-action or screen-recording editing, slide decks, or Remotion/React motion graphics.
+description: Makes animated explainer videos up to 30 minutes long — 3Blue1Brown-style Manim scenes for math/science, or an illustrated Remotion path (AI-generated and public-domain art on a designed page) for history, art, essays and culture — with AI-narrated voice-over (Gemini TTS, macOS say fallback), soft subtitles and chapters, assembled into one mp4 — that teach an idea from its fundamentals up. Use when the user wants a video, animation or narrated visual explanation of a math, science, algorithm or engineering idea, or of an article, essay, period of history or work of art ("explainer video", "3b1b style", "Manim", "animate how X works", "make a video explaining X", "turn this article into a video"), even if Manim is never named. Also use to fix, re-time, re-voice or extend an existing explainer ("the label overlaps at 2:31", "the voice runs ahead of the picture"), or for a short silent Manim clip. Covers the fundamentals-ladder script, adversarial fact review, scene code, transcription-verified narration, parallel rendering, frame-level visual QA and final assembly. Not for written explainers or articles, live-action or screen-recording editing, slide decks, or standalone marketing motion graphics.
 ---
 
 # Explainer video
@@ -16,6 +16,19 @@ front-loaded:
 
 Narration is the clock: each line is voiced first, and the animation fills its measured length.
 
+**Hard limits:**
+- **Videos are at most 30 minutes.** Default to the shortest length that keeps the promise.
+- Enforce the cap on *measured* audio, not just word counts.
+  - Budget: runtime ≈ words ÷ 120 wpm ÷ 0.85. So 30 min ≈ 3,000 words at most, and aim for ≤ 2,700.
+  - `tts.py --list` (or `voice.py --list` on the illustrated path) exits non-zero over `max_minutes`.
+- "Cover everything in this 4,000-word article" is still capped. Tell the user the planned length at the
+  brief, and compress minor examples first.
+
+**Pick the engine by subject, at the brief:**
+- Math, science, algorithms, engineering → Manim (this file).
+- History, art, essays, biography, culture → the **illustrated path**: read `references/illustrated.md`
+  and copy from `examples/medieval-remotion/`. Manim is the wrong tool for painted pages and manuscripts.
+
 `PY` below means `~/.local/share/explainer-video/venv/bin/python`. Never edit files inside this skill
 folder while making a video; work in the project folder. Keep going until `out/<slug>.mp4` exists and
 the user has seen it. If something blocks you, report the exact blocker.
@@ -27,7 +40,7 @@ Copy this checklist into your task list:
 ```
 - [ ] 0. Toolchain     scripts/setup.sh --check  (run without --check to install)
 - [ ] 1. Project       scripts/new_project.sh <dir> "<Title>"; set target_minutes in video.json
-- [ ] 2. Brief + facts viewer, promise, length; sources and sim.py for every number
+- [ ] 2. Brief + facts viewer, promise, length (≤30 min), engine; voice quota plan; sources for every number
 - [ ] 3. Script        <project>/SCRIPT.md: ladder, question chain, central visual, aha, narration
 - [ ] 4. Gate 1        fresh subagent attacks the script (references/review.md); fix High/Medium
 - [ ] 5. Scenes        one KScene file per chapter, listed in video.json
@@ -114,6 +127,15 @@ The user may have edited files by hand. Treat surprising changes as intentional.
   the same prompt.
 - **Silent clip:** no `voice()` blocks; skip steps 2–4, 7 and 8.
 
+## Quotas: plan before voicing
+- Tier-1 Gemini allows **100 TTS requests a day per model**, and retakes count. A 130-line script
+  can't finish on one model in one day.
+- Plan for this at the brief:
+  - one model per character;
+  - or two days;
+  - or Tier 2.
+- Details: `references/audio.md`.
+
 ## Rules that cost the most to learn
 1. **Never put direction words in narration text, and keep `verify: true`.** Gemini 3.8 read
    "Say warmly: …" aloud; tts.py sends style separately and re-generates any clip whose transcript
@@ -124,7 +146,11 @@ The user may have edited files by hand. Treat surprising changes as intentional.
    LaTeX files.
 4. **Reserve layout space for the extreme frame.** A slider that sharpens a curve pushes it into the
    formulas.
-5. **Report honestly.** Say what was verified (transcripts, sync, frames) and what wasn't (how the voice
+5. **Previews are half-size; say so.** The user judged a 540p preview as "super low resolution".
+   - When showing a preview, say it is a low-res draft, or show one 1080p chapter.
+   - Finals render at 1080p with art generated at 2K (illustrated path: JPEG 95 frames, x264 fast,
+     CRF 16).
+6. **Report honestly.** Say what was verified (transcripts, sync, frames) and what wasn't (how the voice
    sounds).
 
 ## Files
@@ -136,8 +162,10 @@ The user may have edited files by hand. Treat surprising changes as intentional.
   - `qa.py` — beat sheets, `--issues`, `--at`
   - `assemble.py`
 - `templates/` — `SCRIPT.md`, `video.json`, a starter scene
-- `references/` — `pedagogy.md`, `manim-cookbook.md`, `audio.md`, `review.md`
+- `references/` — `pedagogy.md`, `manim-cookbook.md`, `audio.md`, `review.md`, `illustrated.md`
 - `examples/kalman/` — a complete 9-scene, 10-minute video
+- `examples/medieval-remotion/` — the illustrated path: a 27-min, 11-chapter history essay (Remotion,
+  Gemini art, two voices, cabinet + compass devices, mix/assemble, beat sheets)
 - `lessons-log.md`, `CHANGELOG.md` — the skill's own history
 
 ## This skill learns

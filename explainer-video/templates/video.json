@@ -9,7 +9,7 @@
   ],
   "voice": {
     "backend": "gemini",
-    "model": "gemini-3.8-flash-tts",
+    "model": "gemini-3.8-flash-lite-tts",
     "voice": "Charon",
     "style": "a warm, curious teacher explaining to one friend: unhurried, clear, gently enthusiastic, with natural pauses at commas and full stops",
     "verify": true,
@@ -18,5 +18,6 @@
   },
   "pause_after_line": 0.45,
   "background": "#0E1117",
-  "target_minutes": 1
+  "target_minutes": 1,
+  "max_minutes": 30
 }

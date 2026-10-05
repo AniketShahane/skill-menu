@@ -8,7 +8,10 @@ On the menu:
 - **Working Memory**: a daily planning ritual with a live visual board.
 - **Android App Craft** (new): build native Android apps (Kotlin + Compose, Material 3 Expressive) that look and move like a premium app. Comes with a starter app that builds and passes its tests.
 - **iOS App Craft** (new): the same for SwiftUI on iOS, including porting an Android app. Comes with a starter app and a card-to-page flight engine.
-- **Explainer Video** (new): 3Blue1Brown-style animated explainer videos (Manim + AI narration + subtitles) that teach a topic from its fundamentals up. Comes with a 10-minute worked example on Kalman filters.
+- **Explainer Video** (updated): animated explainer videos of up to 30 minutes, with AI narration and subtitles, that teach a topic from its fundamentals up.
+  - Math and science use 3Blue1Brown-style Manim scenes.
+  - History, art and essays use a new illustrated Remotion path with AI-generated and public-domain artwork.
+  - Worked examples: Kalman filters (10 min) and an Aeon essay on medieval mental health (28 min).
 
 ---
 
@@ -76,6 +79,14 @@ Ask for "a 3b1b-style video explaining X" and it plans, writes, animates, narrat
 - **Picture and voice stay in step.** Each line is voiced first, and its animation fills the measured length.
 - **QA you can trust.** `render.sh lint` takes seconds and flags text off the screen, text on text, and animations that outlast their line. `qa.py` makes captioned sheets of the settled frame of every narrated beat. `qa.py --at 2:31` pulls the exact frame you're complaining about.
 - **Assembly.** Scenes render in parallel and are joined with the audio padded, so the voice never drifts. The video gets soft subtitles and chapter markers.
+- **Two engines.** Manim for math. For history, art and essays, a Remotion path:
+  - Gemini illustrations at 2K, blended onto a parchment page.
+  - Framed public-domain artworks.
+  - A second voice for quotations.
+  - Per-chapter rendering.
+  - See `references/illustrated.md` and `examples/medieval-remotion/`.
+- **A 30-minute cap.** The word-budget check fails if the script would run over 30 minutes.
+- **Plans around voice limits.** Tier-1 Gemini allows 100 TTS requests a day per model, so voicing is planned per character and per model.
 
 ### Install
 
@@ -184,7 +195,7 @@ skill-menu/
     scripts/          # aq.mjs (state), guard.mjs (safety hook), run.sh (cron), doctor.sh, install.sh
     templates/memory/ # seed memory files
   android-app-craft/ # Kotlin + Compose playbook, starter app, examples
-  explainer-video/   # Manim explainer playbook, kit (narration, render, QA, assembly), Kalman example
+  explainer-video/   # explainer playbook: Manim + illustrated Remotion paths, kit, Kalman + medieval examples
   ios-app-craft/     # SwiftUI playbook, starter app, examples
   working-memory/
     SKILL.md          # the skill definition your agent reads
