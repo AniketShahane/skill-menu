@@ -19,6 +19,15 @@ Spawn a fresh subagent (it must not share your assumptions). Prompt it like this
 >
 > Rank by severity. Be concise. Don't edit files.
 
+For sensitive material (suicide, self-harm, miscarriage, mental illness, medication), add a lens to the
+prompt: "check each mention is accurate to the source, not softened or sharpened, with a caveat where a
+historical belief could hurt a viewer today". In the medieval video this caught several problems:
+- a softened suicide reference;
+- a miscarriage caveat that never said "it is not the mother's fault";
+- an ending that could read as "walks instead of treatment".
+
+Add support lines to the credits: talk to someone, and don't stop prescribed medication without a doctor.
+
 Fix every High and Medium issue in SCRIPT.md. In your report, say which Low ones you skipped and why. The
 Kalman review found:
 - the matrix gain formula was wrong

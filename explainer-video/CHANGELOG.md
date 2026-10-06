@@ -20,3 +20,20 @@
 - Pedagogy: question chain, naive attempt first, storyboard (central visual, key frames, aha), silence budget
   (~100 words per minute of video), short-video path; SCRIPT.md template fields; starter scene rewritten as a hook.
 - SKILL.md: third-person description, fix-an-existing-video path, user preview before final, quick paths.
+
+## 1.1.1 — 2026-10-05
+- Default TTS model is now gemini-3.8-flash-lite-tts (user's choice, for cost); flash-tts documented as the quality option.
+- Transcriber: join all text parts and retry once on an empty reply (one-off empty transcripts left clips unverified).
+
+## 1.2.0 — 2026-10-05 (medieval-mental-health video + deep research on faster pipelines)
+- **30-minute hard cap**: `max_minutes` (default 30) in video.json; `tts.py --list` exits 3 when the
+  estimated runtime is over it. SKILL.md states the budget (≈3,000 words max, aim ≤2,700).
+- **Illustrated path** for history/art/essays: `references/illustrated.md` + `examples/medieval-remotion/`
+  (Remotion chapters, Gemini 2K art with paper-whitening + multiply blend, real-artwork frames, two voices,
+  per-chapter render, Python mix with drone/chimes, soft subs + chapters, beat-sheet stills, render benchmark).
+- Engine choice at the brief (Manim for math, Remotion for illustrated).
+- audio.md: Tier-1 100 RPD per model and how to plan for it; transient no-audio retry; 3.8 consistency
+  issue; ElevenLabs / MLX-Audio fallbacks; WhisperX for word timings.
+- review.md: a sensitive-topics lens for Gate 1, and support lines in the credits.
+- Measured render settings: JPEG 95 + x264 fast CRF 16 is 2.8× faster than PNG + slow at PSNR 49 dB.
+- SKILL.md rule: say previews are low-res; finals at 1080p with 2K art.
