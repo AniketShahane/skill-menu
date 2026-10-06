@@ -42,6 +42,7 @@ required words.
 |---|---|---|
 | asking | your guesses are fine ("ok", "sure", 👍) | Accept every guess, draft, post the approve text in the thread, set `approving`. |
 | asking | answers, by number or not ("2 is the analytics repo") | Record `questions[].answer`, keep the other guesses, draft, set `approving`. If a new decision appears, ask it and stay `asking`. |
+| asking, approving | an answer that asks for real work ("write a query we can share", "put it in a doc", "pull the numbers") | Don't do it in this run. Record the answers, set `scoping` and post the scope card text in the thread ([work.md](work.md) section 2). If nothing is left open (the answer said what to build, or "show me first"), write the brief and set `ready` now: the worker builds it and posts the result in the thread for review. |
 | approving | go ahead ("yes", "lgtm", "do it") | Deliver the draft (section 4), set `drafted`. |
 | approving | change it ("shorter", "mention the Q4 dates") | Revise, post `Revised:` in the thread, stay `approving`. |
 | any open | drop it ("skip", "ignore", "not doing this") | Set `skipped`, confirm in thread, write the ledger entry (learn.md). |

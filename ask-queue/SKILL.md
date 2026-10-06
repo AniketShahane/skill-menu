@@ -59,9 +59,10 @@ checks cost zero tokens. Without a token, runs use the fixed schedule (replies 1
 | setup | "set up ask queue", or config lacks `slack.userId` | [references/setup.md](references/setup.md) |
 | sweep | `scripts/run.sh sweep` (cron), "run a sweep" | [references/sweep.md](references/sweep.md), [references/cards.md](references/cards.md) |
 | replies | `scripts/run.sh replies` (cron), "process my replies" | [references/replies.md](references/replies.md), [references/cards.md](references/cards.md) |
+| hand off | "run a sweep" or "process my replies" in a normal chat session | Don't run it here: that fills this chat. Start `ASK_QUEUE_FORCE=1 <skill-dir>/scripts/run.sh <mode>` in the background, then report only its outcome (new card ids, items moved, errors from the log tail). Results land in the self-DM. Do it inline only if the user asks for that. |
 | learn | end of every sweep and replies run | [references/learn.md](references/learn.md) |
 | work | an item needs real work, a reply on a work card, or you are a worker | [references/work.md](references/work.md) |
-| chat | "what's waiting?", "check my queue" | `$AQ list --open`, then handle each item as replies.md does, taking answers in chat |
+| chat | "what's waiting?", "check my queue" | `$AQ list --open` and post the status summary (cards.md). Answers given in chat are handled as replies.md does; real work still goes to a worker (work.md), never this chat. |
 | watch | "watch my queue" in a long-lived session | Arm a Monitor on `node <skill-dir>/scripts/gate.mjs watch` (max timeout, re-arm on expiry); on each line, run that mode |
 
 Unattended runs (cron) have no one to answer: never ask in chat; decide, record and finish.

@@ -46,13 +46,19 @@ fi
 
 # Token-free check first: start Claude only when there is something to do (exit 10 = nothing new).
 # If the gate itself dies or hangs, fall back to the fixed schedule (`due`, no network).
+# ASK_QUEUE_FORCE=1 (the user asked for a run in chat) skips the gate; the run finds messages itself.
 set +e
-GATE_OUT="$(timeout 180 node "$SKILL_DIR/scripts/gate.mjs" "$MODE" 2>&1)"
-GATE=$?
-if [ "$GATE" -ne 0 ] && [ "$GATE" -ne 10 ]; then
-  echo "$(date -Is) gate failed (exit $GATE), using the fixed schedule: $GATE_OUT" >>"$LOG"
-  node "$SKILL_DIR/scripts/gate.mjs" due "$MODE"
+if [ "${ASK_QUEUE_FORCE:-}" = "1" ]; then
+  GATE=0
+  GATE_OUT="forced (asked for in chat)"
+else
+  GATE_OUT="$(timeout 180 node "$SKILL_DIR/scripts/gate.mjs" "$MODE" 2>&1)"
   GATE=$?
+  if [ "$GATE" -ne 0 ] && [ "$GATE" -ne 10 ]; then
+    echo "$(date -Is) gate failed (exit $GATE), using the fixed schedule: $GATE_OUT" >>"$LOG"
+    node "$SKILL_DIR/scripts/gate.mjs" due "$MODE"
+    GATE=$?
+  fi
 fi
 set -e
 if [ "$GATE" -ne 0 ]; then
