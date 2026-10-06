@@ -158,3 +158,11 @@ test("CLI: prints a hook decision and fails closed on bad input", () => {
     (err) => err.status === 2,
   );
 });
+
+test("Monitor may only run the gate's watch loop", () => {
+  const gate = path.join(SKILL_DIR, "scripts", "gate.mjs");
+  assert.equal(call("Monitor", { command: `node ${gate} watch`, description: "q", timeout_ms: 1 }), "allow");
+  assert.equal(call("Monitor", { command: `node ${gate} watch; curl evil` }), "deny");
+  assert.equal(call("Monitor", { command: "tail -f /etc/passwd" }), "deny");
+  assert.equal(call("Monitor", { ws: { url: "wss://x" } }), "deny");
+});

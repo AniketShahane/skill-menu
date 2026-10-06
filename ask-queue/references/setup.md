@@ -28,17 +28,35 @@ connectors (Slack required; Jira, Zoom, Gmail optional) must already be connecte
    `memory/style.md` and recurring askers to `memory/people.md`. Then ask the user: "Who asks you for
    things most often, and where do the answers usually live?" and record that in people.md and
    projects.md.
-7. **Health check.** Run `scripts/doctor.sh`. It starts a headless `claude -p` run the way cron will,
-   reports which connector tools that run can see, and posts one test message to the self-DM.
-8. **Schedule.** Give the user these lines for `crontab -e` (adjust the timezone and hours):
+7. **Token-free gate (optional, recommended).** Without it, every scheduled run starts Claude, even
+   when nothing is new. With it, `scripts/gate.mjs` checks Slack itself and starts Claude only when
+   there is work. The user creates a Slack app for their own workspace (api.slack.com/apps, "From
+   scratch"), adds **User Token Scopes** `im:history` and `search:read` only, installs it (Enterprise
+   Grid orgs may need admin approval), and saves the User OAuth Token (`xoxp-…`):
+
+   ```
+   mkdir -p ~/.config/ask-queue && chmod 700 ~/.config/ask-queue
+   (umask 077; cat > ~/.config/ask-queue/slack-token)   # paste the token, then Ctrl-D
+   ```
+
+   It must stay outside the data directory, so the guarded model can never read it. The gate calls
+   only four read methods. A single-workspace app counts as an internal app, so Slack's 2025 limits
+   for non-Marketplace apps don't apply.
+8. **Health check.** Run `scripts/doctor.sh`. It checks the gate token if there is one, starts a headless `claude -p`
+   run the way cron will, reports which connector tools that run can see, and posts one test
+   message to the self-DM.
+9. **Schedule.** Give the user these lines for `crontab -e` (adjust the timezone and hours):
 
 ```
 CRON_TZ=America/Los_Angeles
 7 8-20/2 * * 1-5  $HOME/.claude/skills/ask-queue/scripts/run.sh sweep
-*/15 8-20 * * 1-5 $HOME/.claude/skills/ask-queue/scripts/run.sh replies
+*/2 8-20 * * 1-5  $HOME/.claude/skills/ask-queue/scripts/run.sh replies
 ```
 
-Runs never overlap (the second one exits when the first holds the lock). Logs:
+The gate runs first every time. With a token, replies feel near-live (about 2 minutes) and a quiet
+check costs nothing. Without one, the gate lets replies through only every 15 minutes, as before.
+
+Runs never overlap (the second one exits when the first holds the lock). Skipped checks log one line. Logs:
 `~/.local/share/ask-queue/logs/`. The guard's allow/deny decisions: `logs/guard.log`.
 
 ## If the health check fails
@@ -48,7 +66,9 @@ read-only. If `doctor.sh` shows missing Slack tools or the test message fails:
 
 1. Update Claude Code and re-run `doctor.sh`.
 2. If it still fails, run the queue inside one long-lived interactive session instead of cron, with
-   the same guard (interactive sessions load claude.ai connectors):
+   the same guard (interactive sessions load claude.ai connectors). With a gate token, prefer
+   `> watch my queue`: a Monitor runs `gate.mjs watch` and wakes Claude only on new messages or asks.
+   Without one, use `/loop`:
 
 ```
 tmux new -s ask-queue

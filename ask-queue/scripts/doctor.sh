@@ -26,6 +26,7 @@ SETTINGS="$ASK_QUEUE_HOME/tmp/headless-settings.json"
 node "$AQ" settings >"$SETTINGS"
 
 echo "Claude Code: $("$CLAUDE_BIN" --version 2>/dev/null || echo unknown)"
+node "$SKILL_DIR/scripts/gate.mjs" check || fail "gate token check failed (fix or remove ~/.config/ask-queue/slack-token)"
 echo "Data dir:    $ASK_QUEUE_HOME"
 echo "Running a headless check (about a minute)..."
 

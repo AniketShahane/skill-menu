@@ -169,6 +169,11 @@ export function decide(input, ctx) {
   }
 
   if (name === "Bash") return decideBash(toolInput.command, ctx);
+  if (name === "Monitor") {
+    const watch = `node ${path.join(ctx.skillDir, "scripts", "gate.mjs")} watch`;
+    if (!toolInput.ws && String(toolInput.command || "").trim() === watch) return allow("gate watch");
+    return deny("Monitor may only run `node <skill>/scripts/gate.mjs watch`");
+  }
   if (name === "Skill") {
     return toolInput.skill === "ask-queue" ? allow("ask-queue skill") : deny("only the ask-queue skill");
   }

@@ -9,11 +9,13 @@ import {
   AqError,
   addCandidate,
   addLedger,
+  compareTs,
   computeStats,
   createStore,
   declineProposal,
   findLedger,
   listItems,
+  markSeen,
   recordProposal,
   run,
   setSimple,
@@ -121,7 +123,50 @@ test("update enforces the status machine and protects identity fields", () => {
     item.history.filter((h) => h.from).map((h) => `${h.from}>${h.to}`),
     ["new>approving", "approving>drafted", "drafted>done"],
   );
-  assert.throws(() => updateItem(store, "AQ-1", { status: "approving" }, clock), /from done/);
+  assert.throws(() => updateItem(store, "AQ-1", { status: "drafted" }, clock), /from done/);
+});
+
+test("a follow-up reopens a done or skipped item", () => {
+  const store = freshStore();
+  addCandidate(store, candidate(), clock);
+  updateItem(store, "AQ-1", { status: "skipped" }, clock);
+  assert.equal(updateItem(store, "AQ-1", { status: "approving" }, clock).status, "approving");
+  updateItem(store, "AQ-1", { status: "drafted" }, clock);
+  updateItem(store, "AQ-1", { status: "done" }, clock);
+  assert.equal(updateItem(store, "AQ-1", { status: "asking" }, clock).status, "asking");
+});
+
+test("closed cards stay watched for 48 hours after closing", () => {
+  const store = freshStore();
+  addCandidate(store, candidate(), clock);
+  updateItem(store, "AQ-1", { status: "approving", patch: { card: { channelId: "D_ME", ts: "1.1" } } }, clock);
+  updateItem(store, "AQ-1", { status: "skipped" }, clock);
+  assert.deepEqual(listItems(store, { watch: true }, clock).map((i) => i.id), ["AQ-1"]);
+  const later = () => new Date(tick + 49 * 60 * 60 * 1000);
+  assert.deepEqual(listItems(store, { watch: true }, later), []);
+});
+
+test("compareTs orders Slack timestamps exactly", () => {
+  assert.equal(compareTs("1727450000.000200", "1727450000.0002"), 0);
+  assert.equal(compareTs("1727450000.000199", "1727450000.0002"), -1);
+  assert.equal(compareTs("1727450001", "1727450000.999999"), 1);
+});
+
+test("seen moves forward only and updates every item sharing the thread", () => {
+  const store = freshStore();
+  addCandidate(store, candidate({ status: "filtered" }), clock);
+  addCandidate(store, candidate({ fingerprints: ["b"], status: "filtered" }), clock);
+  addCandidate(store, candidate({ fingerprints: ["c"] }), clock);
+  const digest = { channelId: "D_ME", ts: "10.0", lastSeenTs: "10.0" };
+  updateItem(store, "AQ-1", { patch: { card: digest } }, clock);
+  updateItem(store, "AQ-2", { patch: { card: digest } }, clock);
+  updateItem(store, "AQ-3", { status: "asking", patch: { card: { channelId: "D_ME", ts: "11.0" } } }, clock);
+
+  assert.deepEqual(markSeen(store, "D_ME", "10.0", "12.5"), { updated: ["AQ-1", "AQ-2"] });
+  assert.deepEqual(markSeen(store, "D_ME", "10.0", "12.1"), { updated: [] });
+  assert.equal(store.getItem("AQ-2").card.lastSeenTs, "12.5");
+  assert.equal(store.getItem("AQ-3").card.lastSeenTs, undefined);
+  assert.throws(() => markSeen(store, "D_ME", "10.0", "not-a-ts"), AqError);
 });
 
 test("list filters open and watched items", () => {
@@ -154,7 +199,9 @@ test("ledger find matches all terms, newest first", () => {
 
 test("stats: unedited streak drives promotion; edits suggest demotion", () => {
   const store = freshStore();
-  const sent = (edited) => addLedger(store, { id: "AQ-x", outcome: "sent", askType: "share-link", edited }, clock);
+  let n = 0;
+  const sent = (edited) =>
+    addLedger(store, { id: `AQ-${(n += 1)}`, outcome: "sent", askType: "share-link", edited }, clock);
   sent(true);
   for (let i = 0; i < 4; i += 1) sent(false);
   addLedger(store, { id: "AQ-y", outcome: "filtered", askType: "share-link" }, clock);
@@ -234,4 +281,15 @@ test("CLI prints JSON and reports errors on stderr with exit 1", () => {
     () => execFileSync("node", [AQ, "get", "AQ-99"], { env, stdio: "pipe" }),
     (err) => err.status === 1 && /No such item/.test(err.stderr.toString()),
   );
+});
+
+test("stats count only the latest ledger entry of a reopened item", () => {
+  const store = freshStore();
+  addLedger(store, { id: "AQ-1", outcome: "sent", askType: "share-link", edited: false }, clock);
+  addLedger(store, { id: "AQ-2", outcome: "sent", askType: "share-link", edited: false }, clock);
+  addLedger(store, { id: "AQ-1", outcome: "sent", askType: "share-link", edited: true }, clock);
+  const stats = computeStats(store, clock).types["share-link"];
+  assert.equal(stats.closed, 2);
+  assert.equal(stats.edited, 1);
+  assert.equal(stats.uneditedStreak, 0, "AQ-1's follow-up is now the newest entry");
 });

@@ -17,8 +17,15 @@ Do the homework before asking: read the thread, the linked docs and memory. Ask 
 
 ```
 sweep (every 2h)     capture asks ─▶ prep ─▶ card in self-DM
-replies (every 15m)  answers / yes / edits ─▶ draft ─▶ reconcile what was sent ─▶ learn
+replies (every 2m)   answers / yes / edits ─▶ draft ─▶ reconcile what was sent ─▶ learn
 ```
+
+The user only ever writes plain language, in a card's thread or at the top of the self-DM. There
+are no commands to learn: work out what they mean (replies.md).
+
+`scripts/gate.mjs` runs before every scheduled run, with no model. With a read-only Slack token it
+checks for new messages and asks, and Claude starts only when there is something to do; most
+checks cost zero tokens. Without a token, runs use the fixed schedule (replies 15m, sweep 2h).
 
 ## Hard rules
 
@@ -48,6 +55,7 @@ replies (every 15m)  answers / yes / edits ─▶ draft ─▶ reconcile what wa
 | replies | `scripts/run.sh replies` (cron), "process my replies" | [references/replies.md](references/replies.md), [references/cards.md](references/cards.md) |
 | learn | end of every sweep and replies run | [references/learn.md](references/learn.md) |
 | chat | "what's waiting?", "check my queue" | `$AQ list --open`, then handle each item as replies.md does, taking answers in chat |
+| watch | "watch my queue" in a long-lived session | Arm a Monitor on `node <skill-dir>/scripts/gate.mjs watch` (max timeout, re-arm on expiry); on each line, run that mode |
 
 Unattended runs (cron) have no one to answer: never ask in chat; decide, record and finish.
 
@@ -63,7 +71,8 @@ Unattended runs (cron) have no one to answer: never ask in chat; decide, record 
 | Command | Use |
 |---|---|
 | `add --file tmp/c.json` | new ask; returns `created`, `merged` or `duplicate` (fingerprint de-dup) |
-| `list --open` / `list --watch` | open items / items whose card threads need checking |
+| `list --open` / `list --watch` | open items / card threads to check (open, plus closed or filtered in the last 48h) |
+| `seen <channelId> <cardTs> <msgTs>` | mark the user's messages in a card thread handled up to `msgTs` (forward-only) |
 | `get AQ-n` / `update AQ-n [--status s] [--file tmp/p.json] [--note text]` | read / patch an item |
 | `ledger add --file tmp/l.json` / `ledger find <words>` | record a closed ask / search past asks and artifacts |
 | `stats`, `promote`/`demote`/`decline <type>`, `propose <type> --ts <ts>` | autonomy ladder |
@@ -76,7 +85,8 @@ Item fields you write: `title`, `askType` (kebab-case, reuse labels from playboo
 `lastSeenTs`).
 
 Statuses: `new → asking → approving → drafted → done`, plus `skipped` and `filtered` (not an ask for
-the user; shown in a digest so it can be brought back). `$AQ` rejects illegal moves.
+the user; shown in a digest so it can be brought back). A reply on a `done` or `skipped` card within
+48 hours reopens it to `asking` or `approving`. `$AQ` rejects illegal moves.
 
 ## Draft kinds
 
@@ -91,3 +101,17 @@ the user; shown in a digest so it can be brought back). `$AQ` rejects illegal mo
 Slack drafts: avoid `<` and `>` in the text (the draft tool drops text between them); write links as
 plain URLs. Slack allows one draft per channel: if the draft call fails, post the text in the card
 thread instead and say so.
+
+## Context budget
+
+Every scheduled run is a fresh `claude -p` process, so nothing carries over between runs. Keep each
+run small:
+
+- Read only the references listed for the current mode.
+- Replies: when the run prompt names an inbox file, it already holds every new message. Don't re-read threads,
+  and `$AQ get` only the items it names.
+- Slack reads: `response_format` `concise`, and `oldest`/`limit` whenever the tool takes them.
+  Search results are leads: read the thread only for a likely ask.
+- Linked docs: read what the ask needs, not whole folders. Prep at most 10 items per sweep.
+- `$AQ ledger find` returns 5 matches; don't dump the ledger. Memory files stay under ~200 lines
+  (learn.md), so they are cheap to read at the start of every run.

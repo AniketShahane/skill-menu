@@ -64,7 +64,9 @@ something.
 
 `duplicate` means nothing new. `merged` means an open item got a follow-up: if it already has a card,
 post `🤖 AQ-n · Follow-up from <who>: <one line>` in the card thread; re-prep it if the ask changed.
-`created` means a new item to prep.
+`created` means a new item to prep. If the merged item is `drafted` as a Slack reply and the ask
+changed, its Slack draft is now out of date and can't be edited: say so in the follow-up line and
+post the new text in the card thread.
 
 ## 5. Prep (each `new` item, oldest first, at most 10 per sweep)
 

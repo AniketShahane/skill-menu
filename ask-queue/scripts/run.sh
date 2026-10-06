@@ -38,6 +38,27 @@ if ! flock -n 9; then
   exit 0
 fi
 
+# Token-free check first: start Claude only when there is something to do (exit 10 = nothing new).
+# If the gate itself dies or hangs, fall back to the fixed schedule (`due`, no network).
+set +e
+GATE_OUT="$(timeout 180 node "$SKILL_DIR/scripts/gate.mjs" "$MODE" 2>&1)"
+GATE=$?
+if [ "$GATE" -ne 0 ] && [ "$GATE" -ne 10 ]; then
+  echo "$(date -Is) gate failed (exit $GATE), using the fixed schedule: $GATE_OUT" >>"$LOG"
+  node "$SKILL_DIR/scripts/gate.mjs" due "$MODE"
+  GATE=$?
+fi
+set -e
+if [ "$GATE" -ne 0 ]; then
+  echo "$(date -Is) $MODE skipped by gate: $GATE_OUT" >>"$LOG"
+  exit 0
+fi
+INBOX="$ASK_QUEUE_HOME/tmp/inbox.json"
+INBOX_LINE=""
+if [ "$MODE" = "replies" ] && [ -f "$INBOX" ]; then
+  INBOX_LINE="Inbox file (new messages, from gate.mjs): $INBOX"
+fi
+
 MODEL="$(node "$AQ" config get "models.$MODE" | tr -d '"')"
 if [ -z "$MODEL" ] || [ "$MODEL" = "null" ]; then
   MODEL="sonnet"
@@ -49,10 +70,11 @@ node "$AQ" settings >"$SETTINGS"
 PROMPT="Run the ask-queue skill in ${MODE} mode. This is an unattended run: nobody will answer in this chat, so never ask here; decide, record, and finish.
 Skill directory: $SKILL_DIR (read $SKILL_DIR/SKILL.md first, then the references it lists for ${MODE} mode).
 Data directory (your working directory): $ASK_QUEUE_HOME
-State CLI: node $AQ <command>"
+State CLI: node $AQ <command>
+$INBOX_LINE"
 
 cd "$ASK_QUEUE_HOME"
-echo "=== $(date -Is) $MODE start (model $MODEL)" >>"$LOG"
+echo "=== $(date -Is) $MODE start (model $MODEL) gate: $GATE_OUT" >>"$LOG"
 set +e
 timeout "${ASK_QUEUE_TIMEOUT_SECONDS:-1800}" "$CLAUDE_BIN" -p "$PROMPT" \
   --model "$MODEL" \
@@ -63,5 +85,6 @@ timeout "${ASK_QUEUE_TIMEOUT_SECONDS:-1800}" "$CLAUDE_BIN" -p "$PROMPT" \
   --output-format text >>"$LOG" 2>&1
 STATUS=$?
 set -e
+rm -f "$INBOX"
 echo "=== $(date -Is) $MODE end (exit $STATUS)" >>"$LOG"
 exit "$STATUS"

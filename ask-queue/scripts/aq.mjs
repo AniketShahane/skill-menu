@@ -17,15 +17,16 @@ export const TRANSITIONS = {
   approving: ["asking", "approving", "drafted", "filtered", "skipped"],
   drafted: ["approving", "drafted", "done", "filtered", "skipped"],
   filtered: ["new", "asking", "approving", "skipped"],
-  done: [],
-  skipped: [],
+  // A reply on a closed card reopens it (follow-up input must never be lost).
+  done: ["asking", "approving"],
+  skipped: ["asking", "approving"],
 };
 // A type is offered for promotion after this many consecutive drafts went out unedited.
 export const PROMOTE_STREAK = 5;
 // Don't re-offer a declined promotion for a week.
 const PROPOSAL_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
-// Filtered items stay watchable (for "unfilter") for two days.
-const FILTERED_WATCH_MS = 48 * 60 * 60 * 1000;
+// Filtered and closed items stay watchable for two days (unfilter, follow-ups after done/skip).
+const AFTER_CLOSE_WATCH_MS = 48 * 60 * 60 * 1000;
 
 const DEFAULT_CONFIG = {
   timezone: null,
@@ -34,6 +35,8 @@ const DEFAULT_CONFIG = {
   gmail: { account: null },
   sources: { slack: true, jira: false, zoom: false, gmail: false },
   models: { sweep: "opus", replies: "sonnet" },
+  // gate.mjs: force a full sweep after this many quiet hours (reconcile drafts, learn).
+  gate: { maxQuietHours: 6 },
 };
 
 const DEFAULT_STATE = {
@@ -287,12 +290,22 @@ export function summarize(item) {
   };
 }
 
-// When the item last became filtered (not updatedAt, which every thread check bumps).
-function filteredAt(item) {
+// When the item last entered its current status (not updatedAt, which every thread check bumps).
+function enteredStatusAt(item) {
   const event = [...item.history]
     .reverse()
-    .find((h) => h.to === "filtered" || (h.event === "created" && h.status === "filtered"));
+    .find((h) => h.to === item.status || (h.event === "created" && h.status === item.status));
   return event?.at || item.updatedAt;
+}
+
+// Slack ts strings ("1727450000.1234") compared as numbers without float rounding.
+export function compareTs(a, b) {
+  const [as, af = ""] = String(a).split(".");
+  const [bs, bf = ""] = String(b).split(".");
+  if (Number(as) !== Number(bs)) return Number(as) < Number(bs) ? -1 : 1;
+  const fa = af.padEnd(6, "0");
+  const fb = bf.padEnd(6, "0");
+  return fa === fb ? 0 : fa < fb ? -1 : 1;
 }
 
 export function listItems(store, { statuses, open, watch } = {}, clock) {
@@ -305,12 +318,31 @@ export function listItems(store, { statuses, open, watch } = {}, clock) {
       if (watch) {
         if (!item.card?.ts) return false;
         if (["asking", "approving", "drafted"].includes(item.status)) return true;
-        if (item.status === "filtered") return now - Date.parse(filteredAt(item)) < FILTERED_WATCH_MS;
+        if (["filtered", "done", "skipped"].includes(item.status)) {
+          return now - Date.parse(enteredStatusAt(item)) < AFTER_CLOSE_WATCH_MS;
+        }
         return false;
       }
       return true;
     })
     .map(summarize);
+}
+
+// Record that the user's messages up to msgTs in one card thread were handled. Forward-only, and
+// applied to every item whose card is that thread (a filtered digest thread is shared).
+export function markSeen(store, channelId, threadTs, msgTs) {
+  if (!channelId || !threadTs || !/^\d+(\.\d+)?$/.test(String(msgTs || ""))) {
+    throw new AqError("usage: seen <channelId> <cardTs> <messageTs>");
+  }
+  const updated = [];
+  for (const item of store.allItems()) {
+    if (item.card?.channelId !== channelId || item.card?.ts !== threadTs) continue;
+    if (item.card.lastSeenTs && compareTs(item.card.lastSeenTs, msgTs) >= 0) continue;
+    item.card.lastSeenTs = String(msgTs);
+    store.saveItem(item);
+    updated.push(item.id);
+  }
+  return { updated };
 }
 
 export function addLedger(store, entry, clock) {
@@ -344,7 +376,13 @@ export function computeStats(store, clock) {
   const now = (clock ? clock() : new Date()).getTime();
   const state = store.state();
   const byType = {};
+  // A reopened item is closed twice; only its latest entry counts.
+  const latest = new Map();
   for (const entry of store.ledgerEntries()) {
+    latest.delete(entry.id);
+    latest.set(entry.id, entry);
+  }
+  for (const entry of latest.values()) {
     const type = entry.askType || "unlabeled";
     byType[type] ||= [];
     byType[type].push(entry);
@@ -503,6 +541,7 @@ const USAGE = `usage: aq.mjs <command>
   checkpoint get <key> | checkpoint set <key> <value>
   add --file <candidate.json>           create, merge or de-duplicate an ask
   list [--open] [--watch] [--status a,b]
+  seen <channelId> <cardTs> <messageTs> mark user messages up to messageTs handled (forward-only)
   get <id>
   update <id> [--status s] [--file patch.json] [--note text]
   ledger add --file <entry.json> | ledger find <query> [--limit n]
@@ -564,6 +603,8 @@ export function run(argv, env = process.env, clock) {
       );
     case "get":
       return store.getItem(positional[0]);
+    case "seen":
+      return markSeen(store, ...positional);
     case "update":
       return summarize(
         updateItem(

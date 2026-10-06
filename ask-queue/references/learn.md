@@ -23,7 +23,8 @@ For each `drafted` item (`$AQ list --status drafted`), find what the user actual
 
 ## 2. Ledger entry (every item that reaches `done` or `skipped`, or that the user marks `fyi`)
 
-Items the sweep filtered on its own get no entry: only the user's decisions teach.
+Items the sweep filtered on its own get no entry: only the user's decisions teach. A reopened
+item gets a new entry when it closes again; stats count only its latest entry per id.
 
 Write to `tmp/ledger-AQ-n.json`, then `$AQ ledger add --file tmp/ledger-AQ-n.json`:
 
