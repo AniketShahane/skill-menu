@@ -27,7 +27,20 @@ _guess: Finance's live sheet (you answered this for AQ-4 on Sep 12)_
 Reply *yes* to create the draft, or tell me what to change.
 ```
 
-For `doc` and `brief` outputs, show a 3–5 line outline instead of the full text and say where the
+## Scope card (status `scoping`, work.md)
+
+```
+🤖 AQ-21 · Scoping · Lee Park in #data · <link>
+> Can you pull Q3 churn by region and write it up for Monday?
+Deliverables: a private Google Doc: churn by region table (Jul–Sep), 3-line summary, method note.
+Context I'll use: the churn dashboard (link), Lee's Sep 30 thread, last quarter's write-up (AQ-9).
+Where: a folder on this machine. Size: about 30 min.
+1. Q3 = Jul–Sep calendar? _guess: yes (fiscal year = calendar, projects.md)_
+2. Include EMEA split by country? _guess: no (Lee asked by region)_
+Answer, change anything, or say *go*.
+```
+
+For `brief` outputs, show a 3–5 line outline instead of the full text and say where the
 draft will be created.
 
 ## Thread replies
@@ -37,6 +50,8 @@ draft will be created.
   Gmail drafts"; doc: the doc link; jira-comment and brief: the full copy-ready text).
 - Closed: `🤖 AQ-12 · Skipped.` / `🤖 AQ-12 · Marked as not an ask. I'll filter ones like it.`
 - Reopened: `🤖 AQ-12 · Reopened for your follow-up:` then the new draft or questions.
+- Work: `🤖 AQ-21 · Starting.` / `Queued (2nd in line, 5 running).` / the worker's own
+  `Started:` and result messages / `🤖 AQ-21 · <notice>` for worker notices (work.md).
 
 ## Filtered digest (one per sweep, only when something was filtered)
 
@@ -59,6 +74,7 @@ Reply *yes* or *no*. You can undo it anytime: just tell me to ask first again.
 
 ```
 🤖 Queue: 2 need answers (AQ-13, AQ-17) · 1 ready to approve (AQ-12) · 3 drafts waiting for you to send
+Work: 2 running (AQ-21, AQ-23) · 1 queued (AQ-24) · 1 to review (AQ-19) · 1 being scoped (AQ-25)
 ```
 
 ## Alert

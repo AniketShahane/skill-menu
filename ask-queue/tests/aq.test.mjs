@@ -293,3 +293,43 @@ test("stats count only the latest ledger entry of a reopened item", () => {
   assert.equal(stats.edited, 1);
   assert.equal(stats.uneditedStreak, 0, "AQ-1's follow-up is now the newest entry");
 });
+
+test("work items: scoping → ready needs a brief, job fields merge, dispatcher fields are protected", () => {
+  const store = freshStore();
+  addCandidate(store, candidate(), clock);
+  updateItem(store, "AQ-1", { status: "scoping" }, clock);
+  assert.throws(() => updateItem(store, "AQ-1", { status: "ready" }, clock), /job.brief/);
+  updateItem(store, "AQ-1", { patch: { job: { brief: "Do X", repo: "/r" } } }, clock);
+  updateItem(store, "AQ-1", { status: "ready" }, clock);
+  const job = store.getItem("AQ-1").job;
+  assert.equal(job.brief, "Do X");
+  assert.ok(job.readyAt);
+  updateItem(store, "AQ-1", { patch: { job: { followUp: "also Y" } } }, clock);
+  assert.equal(store.getItem("AQ-1").job.repo, "/r");
+  assert.throws(() => updateItem(store, "AQ-1", { patch: { job: { sessionId: "x" } } }, clock), /dispatch.mjs/);
+  assert.throws(() => updateItem(store, "AQ-1", { status: "done" }, clock), /Cannot move/);
+});
+
+test("jobs lists queue order; stop un-queues ready work and flags running work", () => {
+  const store = freshStore();
+  for (const fp of ["a", "b"]) addCandidate(store, candidate({ fingerprints: [fp] }), clock);
+  for (const id of ["AQ-2", "AQ-1"]) {
+    updateItem(store, id, { status: "scoping", patch: { job: { brief: "b" } } }, clock);
+    updateItem(store, id, { status: "ready" }, clock);
+  }
+  assert.deepEqual(run(["jobs"], { ASK_QUEUE_HOME: store.paths.home }).queued.map((q) => q.id), ["AQ-2", "AQ-1"]);
+  run(["stop", "AQ-2"], { ASK_QUEUE_HOME: store.paths.home }, clock);
+  assert.equal(store.getItem("AQ-2").status, "scoping");
+  updateItem(store, "AQ-1", { status: "working" }, clock);
+  run(["stop", "AQ-1"], { ASK_QUEUE_HOME: store.paths.home }, clock);
+  assert.ok(store.getItem("AQ-1").job.stopRequested);
+  assert.equal(store.getItem("AQ-1").status, "working");
+  assert.throws(() => run(["stop", "AQ-2"], { ASK_QUEUE_HOME: store.paths.home }, clock), /nothing is running/);
+});
+
+test("work statuses are watched", () => {
+  const store = freshStore();
+  addCandidate(store, candidate(), clock);
+  updateItem(store, "AQ-1", { status: "scoping", patch: { card: { channelId: "D1", ts: "1.1" } } }, clock);
+  assert.deepEqual(listItems(store, { watch: true }, clock).map((i) => i.id), ["AQ-1"]);
+});

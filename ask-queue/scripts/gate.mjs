@@ -161,7 +161,15 @@ export async function collectInbox(store, call, clock) {
     if (messages.length) noteThreads.push({ parentTs: parent.ts, parentText: compact(parent).text, messages });
   }
 
-  return { createdAt: now.toISOString(), cards, proposals, topLevel, noteThreads };
+  return { createdAt: now.toISOString(), cards, proposals, topLevel, noteThreads, notices: workerNotices(store) };
+}
+
+// Worker news for the user that a replies run must post (dispatch.mjs sets job.notice).
+export function workerNotices(store) {
+  return store
+    .allItems()
+    .filter((item) => item.job?.notice)
+    .map((item) => ({ id: item.id, status: item.status, notice: item.job.notice, card: item.card || null }));
 }
 
 export function inboxKeys(inbox) {
@@ -170,6 +178,7 @@ export function inboxKeys(inbox) {
     ...inbox.cards.flatMap((c) => c.messages.map((m) => `${c.cardTs}:${m.ts}:${m.editedTs || ""}`)),
     ...inbox.proposals.flatMap((p) => p.messages.map((m) => `${p.ts}:${m.ts}`)),
     ...inbox.noteThreads.flatMap((t) => t.messages.map((m) => `${t.parentTs}:${m.ts}`)),
+    ...(inbox.notices || []).map((n) => `notice:${n.id}:${n.notice}`),
   ];
 }
 
@@ -255,7 +264,10 @@ export async function decide(mode, { home, token, fetchImpl, clock } = {}) {
     }
   } catch (err) {
     const reason = `${err.message}; fixed schedule (every ${FALLBACK_MINUTES[mode]}m)`;
-    result = { run: fallbackDue(home, mode, now), reason, fallback: true };
+    const notices = mode === "replies" ? workerNotices(store).length : 0;
+    result = notices
+      ? { run: true, reason: `${notices} worker notices; ${reason}`, fallback: true }
+      : { run: fallbackDue(home, mode, now), reason, fallback: true };
   }
   if (result.run) markRun(home, mode, now);
   return result;

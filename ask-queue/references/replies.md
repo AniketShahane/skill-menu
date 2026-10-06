@@ -7,8 +7,8 @@ Read what the user wrote in their self-DM (card threads and top level), act on i
 
 **If the run prompt names an inbox file, use it and skip the rest of this step.** `scripts/gate.mjs`
 wrote it just before this run with only the user's unhandled messages: `cards[]` (card threads, with the item
-`ids` that share each thread), `proposals[]` (answers to promotion offers), `topLevel[]`, and `noteThreads[]` (the user's replies
-under their own top-level messages, e.g. "no, that was just a note"). A message with `editedTs` was
+`ids` that share each thread), `proposals[]` (answers to promotion offers), `topLevel[]`, `noteThreads[]` (the user's replies
+under their own top-level messages, e.g. "no, that was just a note"), and `notices[]` (news from workers, section 2). A message with `editedTs` was
 edited after you last saw it: act on the new text. A message with `truncated` is longer than the
 inbox holds: read it in full from Slack before acting.
 Don't re-read those threads unless a message refers to something you need to see.
@@ -28,7 +28,9 @@ Otherwise (no gate token), find them yourself:
 5. Note threads: for the user's top-level messages from the last 48 hours that have replies, read
    the thread; new are user messages without 🤖 after checkpoint `note:<parent ts>` (none: all).
 
-No new messages: change nothing and end.
+Worker notices (no inbox: items in `$AQ list --open` whose `job.notice` is set) need posting too.
+
+No new messages and no notices: change nothing and end.
 
 ## 2. Card replies
 
@@ -51,6 +53,12 @@ required words.
 | done, skipped | a thank-you, an aside, nothing to do | Nothing. |
 | any | a fact for later ("Sam is out next week") | Memory (learn.md section 3), and confirm in one line. |
 
+Work items (`scoping`, `ready`, `working`, `review`, and done ones that were work) follow
+[work.md](work.md) sections 3–4 instead of this table, except for facts to remember.
+
+**Worker notices:** post each as `🤖 AQ-n · <notice>` in its card thread, then clear it with
+`{"job": {"notice": null}}` through `$AQ update AQ-n --file`.
+
 Answers teach memory: after recording them, apply learn.md "Memory" to anything reusable ("Q3
 numbers live in Finance's sheet").
 
@@ -64,7 +72,7 @@ There are no commands. Decide what each message is for:
 | The message is | Example | Do |
 |---|---|---|
 | about an existing card | "the Sam one: say Friday", "AQ-12 yes" | Handle it as a reply to that card (section 2). Answer in the card's thread. |
-| something to do | "draft a reply to Lee's email about the offsite" | New item: `source.kind` `manual`, fingerprint `manual:{ts}`, `who` = the user. Prep and card it. |
+| something to do | "draft a reply to Lee's email about the offsite", "pull Q3 churn by region into a doc" | New item: `source.kind` `manual`, fingerprint `manual:{ts}`, `who` = the user. Prep and card it (real work: a scope card, work.md). |
 | a fact to remember | "Priya likes bullet points" | Memory, tagged `(note, <date>)`. Reply in its thread: `🤖 Noted in people.md.` |
 | a question about the queue | "what's waiting?" | Post the status summary (cards.md). |
 | a change to how you work | "stop asking me about share links" | `$AQ promote`/`demote` that type, confirm. |

@@ -56,6 +56,14 @@ CRON_TZ=America/Los_Angeles
 The gate runs first every time. With a token, replies feel near-live (about 2 minutes) and a quiet
 check costs nothing. Without one, the gate lets replies through only every 15 minutes, as before.
 
+After every replies check, `scripts/dispatch.mjs tick` starts queued work (no model). Workers run
+`claude -p` in their own folder under `~/.local/share/ask-queue/jobs/` with a fail-closed guard:
+edits and commands only in that folder, Slack posts only in their card thread, no network
+commands and no push. Limits live in `config.workers` (`max` 5, `dailyRuns` 20, `timeLimitMin` 60,
+`maxBudgetUsd` 10, `model` opus): change one with `$AQ config set workers.max 3`. Code work uses
+a git worktree on a local branch `aq/AQ-n-…`; when you're done with it, push the branch yourself
+and remove the worktree with `git worktree remove`.
+
 Runs never overlap (the second one exits when the first holds the lock). Skipped checks log one line. Logs:
 `~/.local/share/ask-queue/logs/`. The guard's allow/deny decisions: `logs/guard.log`.
 

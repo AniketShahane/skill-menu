@@ -78,6 +78,8 @@ post the new text in the card thread.
 3. **Label.** `askType`: reuse a playbooks.md label when one fits; otherwise coin a kebab-case 1–3
    word label.
 4. **Choose the card.**
+   - Real work (anything beyond a reply draft: a doc, analysis, code): a scope card, status
+     `scoping`, per [work.md](work.md) sections 1–2. Massive work: a `brief` instead.
    - `approving`: you can produce the output now. Guesses are fine when labeled.
    - `asking`: a decision only the user can make; a guess you would bet against; or the draft would
      commit the user (deadline, money, headcount, a promise to someone outside the company). At most
@@ -86,7 +88,7 @@ post the new text in the card thread.
 5. **Draft** (approving only). Write in the user's voice (style.md), tuned to the asker (people.md),
    short, with only facts you can trace. Follow the playbook for the type when there is one.
 6. **Save.** Write the patch (`askType`, `prep`, `questions` or `draft`) to `tmp/AQ-n.json`, then
-   `$AQ update AQ-n --status <asking|approving> --file tmp/AQ-n.json`.
+   `$AQ update AQ-n --status <asking|approving|scoping> --file tmp/AQ-n.json`.
 
 Items beyond the first 10 stay `new` and are prepped next sweep; mention the count in the digest.
 

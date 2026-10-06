@@ -10,17 +10,29 @@ import { fileURLToPath } from "node:url";
 
 export const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-export const OPEN_STATUSES = ["new", "asking", "approving", "drafted"];
+// Work items (anything beyond a reply draft) go scoping → ready → working → review → done instead.
+export const WORK_STATUSES = ["scoping", "ready", "working", "review"];
+export const OPEN_STATUSES = ["new", "asking", "approving", "drafted", ...WORK_STATUSES];
 export const TRANSITIONS = {
-  new: ["asking", "approving", "filtered", "skipped"],
-  asking: ["asking", "approving", "filtered", "skipped"],
-  approving: ["asking", "approving", "drafted", "filtered", "skipped"],
+  new: ["asking", "approving", "scoping", "filtered", "skipped"],
+  asking: ["asking", "approving", "scoping", "filtered", "skipped"],
+  approving: ["asking", "approving", "drafted", "scoping", "filtered", "skipped"],
   drafted: ["approving", "drafted", "done", "filtered", "skipped"],
-  filtered: ["new", "asking", "approving", "skipped"],
+  filtered: ["new", "asking", "approving", "scoping", "skipped"],
+  scoping: ["scoping", "ready", "asking", "approving", "filtered", "skipped"],
+  // ready = the user said go; waits for a free worker slot (dispatch.mjs starts it).
+  ready: ["working", "scoping", "skipped"],
+  working: ["review", "skipped"],
+  // review: the worker posted a result or a question. A reply sends it back to ready (resume).
+  review: ["ready", "scoping", "done", "skipped"],
   // A reply on a closed card reopens it (follow-up input must never be lost).
-  done: ["asking", "approving"],
-  skipped: ["asking", "approving"],
+  done: ["asking", "approving", "scoping", "ready"],
+  skipped: ["asking", "approving", "scoping", "ready"],
 };
+// Statuses whose card threads are checked for replies every run.
+const WATCH_STATUSES = ["asking", "approving", "drafted", ...WORK_STATUSES];
+// Job fields the model may set through `update --file`. The rest belong to dispatch.mjs.
+const JOB_MODEL_KEYS = new Set(["brief", "repo", "base", "followUp", "notice", "result"]);
 // A type is offered for promotion after this many consecutive drafts went out unedited.
 export const PROMOTE_STREAK = 5;
 // Don't re-offer a declined promotion for a week.
@@ -37,6 +49,16 @@ const DEFAULT_CONFIG = {
   models: { sweep: "opus", replies: "sonnet" },
   // gate.mjs: force a full sweep after this many quiet hours (reconcile drafts, learn).
   gate: { maxQuietHours: 6 },
+  workers: {},
+};
+
+// Background workers (dispatch.mjs). config.workers overrides any of these.
+export const WORKER_DEFAULTS = {
+  max: 5, // running at once
+  dailyRuns: 20, // worker starts and resumes per day
+  timeLimitMin: 60, // per run; the worker is stopped after this
+  maxBudgetUsd: 10, // per run (claude --max-budget-usd)
+  model: "opus",
 };
 
 const DEFAULT_STATE = {
@@ -254,11 +276,50 @@ function mergeInto(store, target, candidate, freshFps, at) {
 
 const IMMUTABLE_KEYS = new Set(["id", "history", "createdAt", "fingerprints", "seenCount", "updates"]);
 
-export function updateItem(store, id, { patch = {}, status, note } = {}, clock) {
+// Workers and scheduled runs write items at the same time: one writer per item via a lock dir.
+export function withItemLock(store, id, fn) {
+  const lock = path.join(store.paths.items, `.${id}.lock`);
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    try {
+      fs.mkdirSync(lock);
+      break;
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+      let age = 0;
+      try {
+        age = Date.now() - fs.statSync(lock).mtimeMs;
+      } catch {
+        continue;
+      }
+      if (age > 30_000) fs.rmSync(lock, { recursive: true, force: true });
+      else if (Date.now() > deadline) throw new AqError(`${id} is locked by another writer`);
+      else Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    fs.rmSync(lock, { recursive: true, force: true });
+  }
+}
+
+export function updateItem(store, id, opts = {}, clock) {
+  return withItemLock(store, id, () => applyUpdate(store, id, opts, clock));
+}
+
+function applyUpdate(store, id, { patch = {}, status, note, internal = false } = {}, clock) {
   const item = store.getItem(id);
   const at = nowIso(clock);
   for (const key of Object.keys(patch)) {
     if (IMMUTABLE_KEYS.has(key)) throw new AqError(`Cannot update ${key}`);
+  }
+  if (patch.job !== undefined) {
+    if (typeof patch.job !== "object" || patch.job === null) throw new AqError("job must be an object");
+    const bad = Object.keys(patch.job).filter((key) => !internal && !JOB_MODEL_KEYS.has(key));
+    if (bad.length) throw new AqError(`job.${bad[0]} is managed by dispatch.mjs`);
+    // Merge, so setting job.followUp never wipes the session id.
+    patch = { ...patch, job: { ...(item.job || {}), ...patch.job } };
   }
   const nextStatus = status || patch.status;
   if (nextStatus && !(nextStatus in TRANSITIONS)) throw new AqError(`Unknown status: ${nextStatus}`);
@@ -268,6 +329,10 @@ export function updateItem(store, id, { patch = {}, status, note } = {}, clock) 
   const from = item.status;
   Object.assign(item, patch);
   if (nextStatus) item.status = nextStatus;
+  if (nextStatus === "ready" && from !== "ready") {
+    if (!item.job?.brief) throw new AqError(`${id} needs job.brief before it can be ready`);
+    item.job = { ...item.job, readyAt: at };
+  }
   item.updatedAt = at;
   const event = { at, event: "updated" };
   if (nextStatus && nextStatus !== from) Object.assign(event, { from, to: nextStatus });
@@ -287,7 +352,44 @@ export function summarize(item) {
     source: item.source?.kind || null,
     card: item.card || null,
     updatedAt: item.updatedAt,
+    ...(item.job ? { job: { running: Boolean(item.job.pid), notice: item.job.notice || null } } : {}),
   };
+}
+
+export function workerConfig(store) {
+  let config = {};
+  try {
+    config = store.config();
+  } catch {
+    // not initialized: defaults
+  }
+  return { ...WORKER_DEFAULTS, ...(config.workers || {}) };
+}
+
+// Running and waiting work, in start order (oldest go first).
+export function listJobs(store) {
+  const items = store.allItems();
+  const order = (item) => item.job?.readyAt || item.updatedAt;
+  const queued = items
+    .filter((item) => item.status === "ready")
+    .sort((a, b) => order(a).localeCompare(order(b)))
+    .map((item, i) => ({ id: item.id, title: item.title, position: i + 1 }));
+  const running = items
+    .filter((item) => item.status === "working")
+    .map((item) => ({ id: item.id, title: item.title, startedAt: item.job?.startedAt || null }));
+  const review = items.filter((item) => item.status === "review").map((item) => item.id);
+  return { limit: workerConfig(store).max, running, queued, review };
+}
+
+// "stop": a running worker is stopped by its supervisor (dispatch.mjs), which polls for this flag.
+// Work that has not started goes back to scoping.
+export function stopJob(store, id, clock) {
+  const item = store.getItem(id);
+  if (item.status === "working") {
+    return summarize(updateItem(store, id, { patch: { job: { stopRequested: nowIso(clock) } }, internal: true, note: "stop requested" }, clock));
+  }
+  if (item.status === "ready") return summarize(updateItem(store, id, { status: "scoping", note: "stopped before start" }, clock));
+  throw new AqError(`${id} is ${item.status}: nothing is running`);
 }
 
 // When the item last entered its current status (not updatedAt, which every thread check bumps).
@@ -317,7 +419,7 @@ export function listItems(store, { statuses, open, watch } = {}, clock) {
       if (open && !OPEN_STATUSES.includes(item.status)) return false;
       if (watch) {
         if (!item.card?.ts) return false;
-        if (["asking", "approving", "drafted"].includes(item.status)) return true;
+        if (WATCH_STATUSES.includes(item.status)) return true;
         if (["filtered", "done", "skipped"].includes(item.status)) {
           return now - Date.parse(enteredStatusAt(item)) < AFTER_CLOSE_WATCH_MS;
         }
@@ -337,10 +439,14 @@ export function markSeen(store, channelId, threadTs, msgTs) {
   const updated = [];
   for (const item of store.allItems()) {
     if (item.card?.channelId !== channelId || item.card?.ts !== threadTs) continue;
-    if (item.card.lastSeenTs && compareTs(item.card.lastSeenTs, msgTs) >= 0) continue;
-    item.card.lastSeenTs = String(msgTs);
-    store.saveItem(item);
-    updated.push(item.id);
+    const moved = withItemLock(store, item.id, () => {
+      const fresh = store.getItem(item.id);
+      if (fresh.card.lastSeenTs && compareTs(fresh.card.lastSeenTs, msgTs) >= 0) return false;
+      fresh.card.lastSeenTs = String(msgTs);
+      store.saveItem(fresh);
+      return true;
+    });
+    if (moved) updated.push(item.id);
   }
   return { updated };
 }
@@ -500,14 +606,17 @@ export function nowInfo(store, clock) {
 }
 
 // Settings JSON for headless runs: wires the guard hook with absolute paths.
-export function headlessSettings(home) {
+// With workerId: the worker profile (guard.mjs --worker), which only polices outward actions.
+export function headlessSettings(home, workerId) {
   const guard = path.join(SKILL_DIR, "scripts", "guard.mjs");
   const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
+  if (workerId !== undefined && !/^AQ-\d+$/.test(String(workerId))) throw new AqError(`Invalid item id: ${workerId}`);
+  const worker = workerId ? ` --worker ${workerId}` : "";
   return {
     hooks: {
       PreToolUse: [
         {
-          hooks: [{ type: "command", command: `node ${quote(guard)} ${quote(home)}`, timeout: 20 }],
+          hooks: [{ type: "command", command: `node ${quote(guard)} ${quote(home)}${worker}`, timeout: 20 }],
         },
       ],
     },
@@ -547,7 +656,9 @@ const USAGE = `usage: aq.mjs <command>
   ledger add --file <entry.json> | ledger find <query> [--limit n]
   stats                                 per-askType outcomes and promotion flags
   promote <askType> | demote <askType> | propose <askType> [--ts cardTs] | decline <askType>
-  settings                              headless Claude settings (guard hook)`;
+  jobs                                  running and queued workers
+  stop <id>                             stop a running worker (or un-queue a ready item)
+  settings [--worker <id>]              headless Claude settings (guard hook)`;
 
 export function run(argv, env = process.env, clock) {
   const [command, ...rest] = argv;
@@ -634,8 +745,12 @@ export function run(argv, env = process.env, clock) {
       return recordProposal(store, positional[0], typeof flags.ts === "string" ? flags.ts : null, clock);
     case "decline":
       return declineProposal(store, positional[0]);
+    case "jobs":
+      return listJobs(store);
+    case "stop":
+      return stopJob(store, positional[0], clock);
     case "settings":
-      return headlessSettings(home);
+      return headlessSettings(home, typeof flags.worker === "string" ? flags.worker : undefined);
     default:
       throw new AqError(USAGE);
   }

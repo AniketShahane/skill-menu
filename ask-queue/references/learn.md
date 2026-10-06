@@ -15,6 +15,7 @@ For each `drafted` item (`$AQ list --status drafted`), find what the user actual
 | `gmail-reply` | `search_threads` `in:sent` on the source thread, then `get_thread` |
 | `jira-comment` | `getJiraIssue`: the user's comments after the draft |
 | `doc`, `brief` | nothing to find; they close when the user replies `done` |
+| work items (work.md) | not reconciled: they close in review when the user says it looks good |
 
 - Found: `final` = the sent text. `edited` = true when the meaning, facts, structure or tone changed.
   Whitespace, punctuation and a typo fix are not edits. Set `done`.

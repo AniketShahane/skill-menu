@@ -266,3 +266,18 @@ test("note threads keep their own marks", async () => {
     "B's mark must not hide A's older reply",
   );
 });
+
+test("worker notices start a replies run, with or without a token", async () => {
+  const { home, store } = freshHome();
+  const id = cardItem(store, "scoping", { channelId: "D_ME", ts: "500.0", lastSeenTs: "500.0" });
+  updateItem(store, id, { patch: { job: { notice: "Stopped." } } }, clock);
+  const slack = fakeSlack();
+  const result = await decide("replies", { home, token: TOKEN, fetchImpl: slack.fetchImpl, clock });
+  assert.equal(result.run, true);
+  assert.deepEqual(inbox(home).notices.map((n) => [n.id, n.notice]), [[id, "Stopped."]]);
+  // Without a token the fixed schedule would wait 15 minutes; a notice doesn't.
+  assert.equal((await decide("replies", { home, token: null, clock })).run, true);
+  assert.equal((await decide("replies", { home, token: null, clock })).run, true);
+  updateItem(store, id, { patch: { job: { notice: null } } }, clock);
+  assert.equal((await decide("replies", { home, token: TOKEN, fetchImpl: slack.fetchImpl, clock })).run, false);
+});
