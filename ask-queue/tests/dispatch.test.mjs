@@ -6,7 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { addCandidate, createStore, updateItem } from "../scripts/aq.mjs";
-import { execJob, tick } from "../scripts/dispatch.mjs";
+import { execJob, settingsFile, tick } from "../scripts/dispatch.mjs";
 import { decide, makeContext } from "../scripts/guard.mjs";
 
 const AQ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts", "aq.mjs");
@@ -61,12 +61,13 @@ test("tick starts at most workers.max and queues the rest, in order", () => {
   assert.match(job.sessionId, /^[0-9a-f-]{36}$/);
   assert.ok(fs.readFileSync(path.join(job.dir, "brief.md"), "utf8").includes("Write a.txt"));
   assert.ok(fs.existsSync(job.workDir));
-  assert.match(fs.readFileSync(path.join(job.dir, "settings.json"), "utf8"), /--worker AQ-1/);
+  assert.match(fs.readFileSync(settingsFile(home, "AQ-1"), "utf8"), /--worker AQ-1/);
+  assert.ok(!fs.existsSync(path.join(job.dir, "settings.json")), "guard settings stay out of the writable job folder");
 });
 
 test("daily cap leaves work queued with one notice", () => {
   const { home, store } = setup(2);
-  fs.writeFileSync(path.join(home, "workers.json"), JSON.stringify({ day: new Date().toISOString().slice(0, 10), runs: 20 }));
+  fs.writeFileSync(path.join(home, "workers.json"), JSON.stringify({ day: new Date().toISOString().slice(0, 10), runs: 100 }));
   const result = tick({ home, spawnSupervisor: () => {}, alive: () => true });
   assert.deepEqual(result.started, []);
   assert.match(store.getItem("AQ-1").job.notice, /limit/);
@@ -94,7 +95,8 @@ test("repo work gets a git worktree on a new local branch", () => {
   tick({ home, spawnSupervisor: () => {}, alive: () => true });
   const job = store.getItem("AQ-1").job;
   assert.match(job.branch, /^aq\/AQ-1-job-1$/);
-  assert.ok(fs.existsSync(path.join(job.workDir, "x.txt")));
+  assert.equal(job.repoDir, path.join(job.workDir, "repo"));
+  assert.ok(fs.existsSync(path.join(job.repoDir, "x.txt")));
 });
 
 test("a bad repo sends the item back to scoping with a notice", () => {
@@ -155,7 +157,10 @@ test("worker guard: job folder only, own thread only, no push or network", () =>
   const call = (tool_name, tool_input, cwd = work) => decide({ tool_name, tool_input, cwd }, ctx).decision;
 
   assert.equal(call("Write", { file_path: path.join(work, "a.txt") }), "allow");
-  assert.equal(call("Write", { file_path: path.join(home, "memory", "people.md") }), "deny");
+  assert.equal(call("Write", { file_path: path.join(home, "memory", "people.md") }), "allow");
+  assert.equal(call("Write", { file_path: path.join(home, "memory", "notes.json") }), "deny");
+  assert.equal(call("Write", { file_path: path.join(home, "items", "AQ-1.json") }), "deny");
+  assert.equal(call("Write", { file_path: settingsFile(home, "AQ-1") }), "deny");
   assert.equal(call("Read", { file_path: path.join(home, "memory", "people.md") }), "allow");
   assert.equal(call("Read", { file_path: path.join(home, "items", "AQ-1.json") }), "deny");
   assert.equal(call("Bash", { command: "python3 analysis.py | head -5" }), "allow");

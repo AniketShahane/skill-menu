@@ -1,7 +1,9 @@
 # Cards
 
 Every message goes to the user's self-DM, starts with 🤖, and is short enough to read on a phone.
-A card is one top-level message; everything about that ask happens in its thread.
+A card is one top-level message; everything about that ask happens in its thread. Each card and
+its thread replies are posted by that card's own session ([card-session.md](card-session.md)); the
+filtered digest and promotion offers by the sweep.
 
 Layout: header line (id, state, who, where, link) → the ask (a quote of at most 2 lines) → the body
 → one line saying how to reply.
@@ -50,8 +52,8 @@ draft will be created.
   Gmail drafts"; doc: the doc link; jira-comment and brief: the full copy-ready text).
 - Closed: `🤖 AQ-12 · Skipped.` / `🤖 AQ-12 · Marked as not an ask. I'll filter ones like it.`
 - Reopened: `🤖 AQ-12 · Reopened for your follow-up:` then the new draft or questions.
-- Work: `🤖 AQ-21 · Starting.` / `Queued (2nd in line, 5 running).` / the worker's own
-  `Started:` and result messages / `🤖 AQ-21 · <notice>` for worker notices (work.md).
+- Work: `🤖 AQ-21 · Starting.` / `Queued (2nd in line, 5 running).` / the work run's own
+  `Started:` and result messages / `🤖 AQ-21 · <notice>` for session notices (work.md).
 
 ## Filtered digest (one per sweep, only when something was filtered)
 

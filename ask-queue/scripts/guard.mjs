@@ -3,9 +3,11 @@
 // below allows it; everything else is denied, so the run can read and draft but never send.
 // Wired by `aq.mjs settings` as: node guard.mjs <ASK_QUEUE_HOME>   (hook JSON arrives on stdin)
 //
-// Worker profile (`node guard.mjs <home> --worker AQ-n`, for dispatch.mjs workers). Still
-// fail-closed: edits and commands only inside the worker's job folder (<home>/jobs/AQ-n), Slack
-// posts only in its own card thread, the same draft-only MCP rules, no push, no network commands.
+// Worker profile (`node guard.mjs <home> --worker AQ-n`, for dispatch.mjs card sessions). Still
+// fail-closed: edits and commands only inside the session's job folder (<home>/jobs/AQ-n), plus
+// memory/*.md; aq.mjs may change only its own item; Slack posts only in its own card thread, except
+// one top-level post of the card itself while the item has no card; the same draft-only MCP rules,
+// no push, no network commands.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -98,6 +100,9 @@ function loadCard(home, workerId) {
 export function makeContext(home, workerId) {
   if (workerId !== undefined && !/^AQ-\d+$/.test(String(workerId))) throw new Error(`invalid worker id: ${workerId}`);
   const resolved = path.resolve(home);
+  // Set when the card's one top-level post is allowed. Outside the job folder, so the session can't
+  // clear it; dispatch.mjs clears it when a prep run is retried.
+  const marker = workerId ? path.join(resolved, "jobs", ".cardposts", workerId) : null;
   return {
     home: resolved,
     skillDir: SKILL_DIR,
@@ -106,6 +111,11 @@ export function makeContext(home, workerId) {
     workerId: workerId || null,
     jobDir: workerId ? path.join(resolved, "jobs", workerId) : null,
     card: workerId ? loadCard(home, workerId) : null,
+    cardPosted: () => Boolean(marker) && fs.existsSync(marker),
+    markCardPosted: () => {
+      fs.mkdirSync(path.dirname(marker), { recursive: true });
+      fs.writeFileSync(marker, `${new Date().toISOString()}\n`);
+    },
   };
 }
 
@@ -131,10 +141,20 @@ function decideMcp(name, input, ctx) {
 
   if (server.includes("slack") && tool === "slack_send_message" && ctx.workerId) {
     const card = ctx.card;
-    if (card?.ts && input?.channel_id === card.channelId && input?.thread_ts === card.ts) {
-      return allow("worker post in its own card thread");
+    if (card?.ts) {
+      if (input?.channel_id === card.channelId && input?.thread_ts === card.ts) {
+        return allow("worker post in its own card thread");
+      }
+      return deny(`a worker may only post in its own card thread (thread_ts ${card.ts})`);
     }
-    return deny(`a worker may only post in its own card thread (thread_ts ${card?.ts || "unknown"})`);
+    // No card yet: exactly one top-level post of the card to the user's own DM.
+    const self = [ctx.config.slack?.userId, ctx.config.slack?.selfDmId].filter(Boolean);
+    if (self.length && self.includes(input?.channel_id) && !input?.thread_ts && !input?.reply_broadcast) {
+      if (ctx.cardPosted()) return deny("the card is already posted: record it with aq.mjs update, then post in its thread");
+      ctx.markCardPosted();
+      return allow("the session posts its card (one top-level message to the user's own DM)");
+    }
+    return deny("no card yet: the only allowed post is the card itself, top-level in the user's own DM");
   }
   if (server.includes("slack") && tool === "slack_send_message") {
     const self = [ctx.config.slack?.userId, ctx.config.slack?.selfDmId].filter(Boolean);
@@ -170,9 +190,29 @@ function decideMcp(name, input, ctx) {
 // Commands that reach other machines or publish work. Workers never push: the user does.
 const WORKER_BLOCKED = /(^|[\s;&|(`])(curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|ftp|sudo|su|gh|glab|npx|pip|pip3|npm|yarn|pnpm|docker|crontab|nohup|disown|setsid)(\s|$)|\bgit\b[^\n]*\b(push|remote|config|credential|clone|fetch|pull|submodule)\b/;
 
+// aq.mjs commands a session may run: reads, plus changes to its own item and the ledger.
+const WORKER_AQ_READS = new Set(["get", "list", "now", "stats", "jobs"]);
+
+function decideWorkerAq(cmd, ctx) {
+  if (/[;&|`$<>\\\n\r]/.test(cmd)) return deny("run aq.mjs alone, without shell operators");
+  const words = cmd.split(/\s+/).map((w) => w.replace(/^['"]|['"]$/g, ""));
+  const aq = path.join(ctx.skillDir, "scripts", "aq.mjs");
+  if (words[0] !== "node" || path.resolve(words[1] || "") !== aq) return deny("run aq.mjs as `node <skill>/scripts/aq.mjs ...`");
+  const [sub, arg] = words.slice(2);
+  if (WORKER_AQ_READS.has(sub)) return allow("aq.mjs read");
+  if ((sub === "config" || sub === "checkpoint") && arg === "get") return allow("aq.mjs read");
+  if (sub === "ledger" && (arg === "find" || arg === "add")) return allow("aq.mjs ledger");
+  if (sub === "update" && arg === ctx.workerId) return allow("aq.mjs update of the session's own item");
+  return deny(`a card session may only read state and update ${ctx.workerId}`);
+}
+
 function decideWorkerBash(command, cwd, ctx) {
   const cmd = String(command || "").trim();
   if (!cmd) return deny("empty command");
+  if (/\baq\.mjs\b/.test(cmd)) {
+    const verdict = decideWorkerAq(cmd, ctx);
+    if (verdict.decision === "deny") return verdict;
+  }
   if (!isInside(path.resolve(cwd), ctx.jobDir)) return deny("commands run only inside the job folder");
   if (WORKER_BLOCKED.test(cmd)) return deny("network, install, push and background commands are blocked for workers");
   if (/\$\{?(HOME|USER|XDG_[A-Z_]+|ASK_QUEUE_[A-Z_]+|PWD|OLDPWD)\b|(^|[\s=:'"(])~|(^|\s)cd\s*($|[;&|])|\bcd\s+-/.test(cmd)) {
@@ -204,8 +244,11 @@ function decideWorker(name, toolInput, input, ctx) {
   if (name in WRITE_TOOLS) {
     const raw = toolInput[WRITE_TOOLS[name]];
     if (typeof raw !== "string" || !raw) return deny("missing file path");
-    if (isInside(path.resolve(cwd, raw), ctx.jobDir)) return allow("edit inside the job folder");
-    return deny("workers edit only inside their job folder");
+    const target = path.resolve(cwd, raw);
+    if (isInside(target, ctx.jobDir)) return allow("edit inside the job folder");
+    // Card sessions learn on close (learn.md): the memory notes, and nothing else outside the job.
+    if (path.dirname(target) === path.join(ctx.home, "memory") && target.endsWith(".md")) return allow("memory note");
+    return deny("workers edit only inside their job folder (and memory/*.md)");
   }
   if (name === "Bash") return decideWorkerBash(toolInput.command, cwd, ctx);
   if (name.startsWith("mcp__")) return decideMcp(name, toolInput, ctx);

@@ -67,9 +67,16 @@ test("replies: a message sent while the last run worked is still picked up", asy
     },
   });
   const result = await decide("replies", { home, token: TOKEN, fetchImpl: slack.fetchImpl, clock });
-  assert.equal(result.run, true);
-  assert.deepEqual(inbox(home).cards[0].messages.map((m) => m.text), ["also cc Dana"]);
-  assert.deepEqual(inbox(home).cards[0].ids, ["AQ-1"]);
+  // The card thread goes straight to the card's session: no Claude replies run, no inbox.
+  assert.equal(result.run, false);
+  assert.deepEqual(result.routed, ["AQ-1"]);
+  assert.equal(fs.existsSync(path.join(home, "tmp", "inbox.json")), false);
+  const item = store.getItem("AQ-1");
+  assert.equal(item.status, "ready");
+  assert.equal(item.job.restingStatus, "approving");
+  assert.match(item.job.followUp, /also cc Dana/);
+  assert.doesNotMatch(item.job.followUp, /shorter/);
+  assert.equal(item.card.lastSeenTs, "100.2");
 });
 
 test("replies: edits count as new, and replies on recently closed cards are kept", async () => {
@@ -80,10 +87,14 @@ test("replies: edits count as new, and replies on recently closed cards are kept
       "200.0": [me("200.1", "skip"), me("200.4", "actually do it, use the Q4 tab", { edited: { ts: "200.9" } })],
     },
   });
-  await decide("replies", { home, token: TOKEN, fetchImpl: slack.fetchImpl, clock });
-  const [msg] = inbox(home).cards[0].messages;
-  assert.equal(msg.text, "actually do it, use the Q4 tab");
-  assert.equal(msg.editedTs, "200.9");
+  const result = await decide("replies", { home, token: TOKEN, fetchImpl: slack.fetchImpl, clock });
+  assert.deepEqual(result.routed, ["AQ-1"]);
+  const item = store.getItem("AQ-1");
+  assert.equal(item.status, "ready");
+  assert.equal(item.job.restingStatus, "skipped");
+  assert.match(item.job.followUp, /edited 200\.9\] actually do it, use the Q4 tab/);
+  assert.doesNotMatch(item.job.followUp, /\] skip$/m);
+  assert.equal(item.card.lastSeenTs, "200.9");
 });
 
 test("replies: top level keeps the user's plain messages only", async () => {
@@ -198,7 +209,9 @@ test("pages are followed; too many pages fall back instead of skipping", async (
     return { status: 200, headers: { get: () => null }, json: async () => body };
   };
   await decide("replies", { home, token: TOKEN, fetchImpl, clock });
-  assert.deepEqual(inbox(home).cards[0].messages.map((m) => m.text), ["first page", "second page"]);
+  const { followUp } = store.getItem("AQ-1").job;
+  assert.match(followUp, /first page/);
+  assert.match(followUp, /second page/);
 
   const endless = async () => ({
     status: 200,

@@ -1,16 +1,17 @@
 # Sweep
 
-Runs every 2 hours. Capture new asks since the last sweep, prep each one, post a card per ask.
-Then reconcile drafts and learn ([learn.md](learn.md)).
+Runs every 2 hours. Capture new asks since the last sweep and add them to the queue. You don't
+prep them: each new ask gets its own card session ([card-session.md](card-session.md)), which
+`scripts/dispatch.mjs` starts as soon as this run ends, and which preps the ask, posts its card and
+handles every reply. Then post the filtered digest, reconcile drafts and learn ([learn.md](learn.md)).
 
 ## Contents
 1. Window
 2. Harvest (per source)
 3. Candidate bar
 4. Add and de-duplicate
-5. Prep
-6. Post cards and the filtered digest
-7. Finish
+5. The filtered digest
+6. Finish
 
 ## 1. Window
 
@@ -62,47 +63,21 @@ something.
 }
 ```
 
-`duplicate` means nothing new. `merged` means an open item got a follow-up: if it already has a card,
-post `🤖 AQ-n · Follow-up from <who>: <one line>` in the card thread; re-prep it if the ask changed.
-`created` means a new item to prep. If the merged item is `drafted` as a Slack reply and the ask
-changed, its Slack draft is now out of date and can't be edited: say so in the follow-up line and
-post the new text in the card thread.
+`duplicate` means nothing new. `created` means a new ask: leave it `new` for its card session.
+`merged` means an open item got a follow-up: pass it to that card's session, which posts it in the
+card thread and re-preps if the ask changed. Write
+`{"messages": [{"text": "Follow-up from <who> in <where>: <one line> <url>"}]}` to
+`tmp/route-AQ-n.json` and run `$AQ route AQ-n --file tmp/route-AQ-n.json` (no `seenTs`: this is
+not a card-thread message). A `filtered` item can't take follow-ups that way: leave it in the digest.
 
-## 5. Prep (each `new` item, oldest first, at most 10 per sweep)
+## 5. The filtered digest
 
-1. **Gather.** Full thread or issue, docs linked in the ask or thread (Drive `read_file_content`,
-   Notion fetch), `$AQ ledger find "<who>"` and `$AQ ledger find "<topic words>"` for what was asked
-   and sent before, and the memory files.
-2. **Understand.** `prep.need`: what the asker actually needs, in one sentence. `prep.output`: the
-   artifact that satisfies it (a draft kind from SKILL.md). `prep.basis`: the sources you used.
-3. **Label.** `askType`: reuse a playbooks.md label when one fits; otherwise coin a kebab-case 1–3
-   word label.
-4. **Choose the card.**
-   - Real work (anything beyond a reply draft: a doc, analysis, code): a scope card, status
-     `scoping`, per [work.md](work.md) sections 1–2. Massive work: a `brief` instead.
-   - `approving`: you can produce the output now. Guesses are fine when labeled.
-   - `asking`: a decision only the user can make; a guess you would bet against; or the draft would
-     commit the user (deadline, money, headcount, a promise to someone outside the company). At most
-     3 questions, each with your best guess and its basis.
-   - If `askType` is in `simpleTypes`, choose `approving` unless the draft would commit the user.
-5. **Draft** (approving only). Write in the user's voice (style.md), tuned to the asker (people.md),
-   short, with only facts you can trace. Follow the playbook for the type when there is one.
-6. **Save.** Write the patch (`askType`, `prep`, `questions` or `draft`) to `tmp/AQ-n.json`, then
-   `$AQ update AQ-n --status <asking|approving|scoping> --file tmp/AQ-n.json`.
+If any items were created as `filtered` this sweep, post ONE digest message to
+`config.slack.selfDmId` (cards.md) and set each filtered item's `card` to
+`{ "channelId": selfDmId, "ts": <digest ts>, "lastSeenTs": <digest ts> }`. Post nothing else: cards
+for new asks come from their card sessions.
 
-Items beyond the first 10 stay `new` and are prepped next sweep; mention the count in the digest.
-
-## 6. Post cards and the filtered digest
-
-- Post each card as a top-level message to `config.slack.selfDmId` using `slack_send_message`,
-  formatted as in [cards.md](cards.md). Then record `card` with `$AQ update AQ-n --file`:
-  `{ "card": { "channelId": selfDmId, "ts": <message ts>, "lastSeenTs": <message ts> } }`. If the send
-  result lacks a `ts`, read the newest self-DM message with `slack_read_channel` (limit 1).
-- If any items were created as `filtered` this sweep, post ONE digest message (cards.md) and set each
-  filtered item's `card` to the digest's ts. Items left `new` over the cap are counted there too.
-- Post nothing when there is nothing new.
-
-## 7. Finish
+## 6. Finish
 
 1. Reconcile `drafted` items and run the learn steps ([learn.md](learn.md)).
 2. For each source that succeeded: `$AQ checkpoint set <source> <sweepStartedAt>`. Leave a failed

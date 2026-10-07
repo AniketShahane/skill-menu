@@ -31,8 +31,9 @@ connectors (Slack required; Jira, Zoom, Gmail optional) must already be connecte
 7. **Token-free gate (optional, recommended).** Without it, every scheduled run starts Claude, even
    when nothing is new. With it, `scripts/gate.mjs` checks Slack itself and starts Claude only when
    there is work. The user creates a Slack app for their own workspace (api.slack.com/apps, "From
-   scratch"), adds **User Token Scopes** `im:history` and `search:read` only, installs it (Enterprise
-   Grid orgs may need admin approval), and saves the User OAuth Token (`xoxp-…`):
+   scratch"), adds the **User Token Scope** `im:history` (not a bot scope; optionally also the legacy
+   `search:read`, which lets the gate skip quiet sweeps too), installs it (Enterprise Grid orgs may
+   need admin approval), and saves the User OAuth Token (`xoxp-…`, not the bot's `xoxb-`):
 
    ```
    mkdir -p ~/.config/ask-queue && chmod 700 ~/.config/ask-queue
@@ -53,16 +54,22 @@ CRON_TZ=America/Los_Angeles
 */2 8-20 * * 1-5  $HOME/.claude/skills/ask-queue/scripts/run.sh replies
 ```
 
-The gate runs first every time. With a token, replies feel near-live (about 2 minutes) and a quiet
-check costs nothing. Without one, the gate lets replies through only every 15 minutes, as before.
+The gate runs first every time. With a token, a reply in a card thread reaches that card's session
+in about 2 minutes, and a quiet check costs nothing. Without one, the gate lets replies through only
+every 15 minutes, as before.
 
-After every replies check, `scripts/dispatch.mjs tick` starts queued work (no model). Workers run
-`claude -p` in their own folder under `~/.local/share/ask-queue/jobs/` with a fail-closed guard:
-edits and commands only in that folder, Slack posts only in their card thread, no network
-commands and no push. Limits live in `config.workers` (`max` 5, `dailyRuns` 20, `timeLimitMin` 60,
-`maxBudgetUsd` 10, `model` opus): change one with `$AQ config set workers.max 3`. Code work uses
-a git worktree on a local branch `aq/AQ-n-…`; when you're done with it, push the branch yourself
-and remove the worktree with `git worktree remove`.
+Every card has its own Claude session. After every check (sweep or replies, run or skipped),
+`scripts/dispatch.mjs tick` (no model) starts queued sessions: new asks to prep, cards with new
+replies, work after "go". Each session runs `claude -p` in its own folder under
+`~/.local/share/ask-queue/jobs/AQ-n/work` and is resumed there for every round, with a fail-closed
+guard: edits and commands only in that folder (plus memory notes), `aq.mjs` changes only to its own
+item, Slack posts only in its card thread (plus posting the card itself once), no network commands
+and no push. Limits live in `config.workers`: `max` 5 sessions at once, `dailyRuns` 100 runs a day;
+card runs `cardModel` opus, `cardEffort` medium, `cardBudgetUsd` 5, `cardTimeLimitMin` 20; work runs `model` opus,
+`maxBudgetUsd` 10, `timeLimitMin` 60. Change one with `$AQ config set workers.max 3`. A closed
+card keeps its session for 48 hours. Code work uses a git worktree at `jobs/AQ-n/work/repo` on a
+local branch `aq/AQ-n-…`; when you're done with it, push the branch yourself and remove the
+worktree with `git worktree remove`.
 
 Runs never overlap (the second one exits when the first holds the lock). Skipped checks log one line. Logs:
 `~/.local/share/ask-queue/logs/`. The guard's allow/deny decisions: `logs/guard.log`.

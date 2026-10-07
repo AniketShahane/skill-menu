@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // Token-free pre-check: decides whether a Claude run is needed, using plain Slack Web API reads.
-// Optional. Needs a read-only Slack user token (scopes: im:history, search:read) in
+// Optional. Needs a read-only Slack user token (scope im:history; add the legacy search:read to
+// also gate sweeps, else sweeps keep the fixed schedule) in
 // $ASK_QUEUE_SLACK_TOKEN or ~/.config/ask-queue/slack-token. That file sits outside the data dir,
 // so the guarded model can't read it. Without a token, runs fall back to the fixed schedule.
 //
-//   gate.mjs replies   exit 0 = run Claude (writes tmp/inbox.json), exit 10 = nothing new
+//   gate.mjs replies   routes card-thread replies to their card sessions (no Claude run), then
+//                      exit 0 = run Claude for the rest (writes tmp/inbox.json), exit 10 = nothing left
 //   gate.mjs sweep     exit 0 = run Claude, exit 10 = nothing new
 //   gate.mjs due <m>   no network: the fixed-schedule fallback alone (run.sh uses it if the gate dies)
 //   gate.mjs check     verify the token (doctor.sh)
@@ -14,7 +16,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { compareTs, computeStats, createStore, listItems, resolveHome } from "./aq.mjs";
+import { compareTs, computeStats, createStore, listItems, resolveHome, routeToCard } from "./aq.mjs";
+import { tick } from "./dispatch.mjs";
 
 export const EXIT_RUN = 0;
 export const EXIT_SKIP = 10;
@@ -172,6 +175,35 @@ export function workerNotices(store) {
     .map((item) => ({ id: item.id, status: item.status, notice: item.job.notice, card: item.card || null }));
 }
 
+// Card threads with one item go straight to that card's session: messages appended to its
+// job.followUp, the item queued, the thread marked seen. Shared digest threads (filtered items),
+// promotion offers, top-level messages and note threads stay in the inbox for a Claude run.
+export function routeInbox(store, inbox, clock) {
+  const routed = [];
+  const remaining = [];
+  for (const thread of inbox.cards) {
+    let done = false;
+    if (thread.ids.length === 1) {
+      try {
+        const item = store.getItem(thread.ids[0]);
+        if (item.status !== "filtered") {
+          const seenTs = thread.messages
+            .map((m) => m.editedTs || m.ts)
+            .reduce((max, ts) => (compareTs(ts, max) > 0 ? ts : max));
+          routeToCard(store, item.id, { messages: thread.messages, seenTs }, clock);
+          routed.push(item.id);
+          done = true;
+        }
+      } catch {
+        // could not route: the Claude run handles it
+      }
+    }
+    if (!done) remaining.push(thread);
+  }
+  inbox.cards = remaining;
+  return routed;
+}
+
 export function inboxKeys(inbox) {
   return [
     ...inbox.topLevel.map((m) => `top:${m.ts}:${m.editedTs || ""}`),
@@ -194,8 +226,6 @@ export async function sweepNeeded(store, call, clock) {
   if (others.length) return { run: true, reason: `${others.join(", ")} can only be checked by Claude` };
   const since = state.checkpoints.slack;
   if (!since) return { run: true, reason: "first sweep" };
-  const waiting = listItems(store, { statuses: ["new"] }, clock).length;
-  if (waiting) return { run: true, reason: `${waiting} asks still waiting to be prepped` };
   const quietHours = config.gate?.maxQuietHours ?? 6;
   const last = state.checkpoints["sweep:last"];
   if (!last || now - Date.parse(last) >= quietHours * 3600 * 1000) {
@@ -251,14 +281,16 @@ export async function decide(mode, { home, token, fetchImpl, clock } = {}) {
     const call = slackClient(token, fetchImpl);
     if (mode === "replies") {
       const inbox = await collectInbox(store, call, clock);
+      const routed = routeInbox(store, inbox, clock);
       const count = inboxKeys(inbox).length;
       if (count) {
         fs.mkdirSync(path.dirname(inboxFile), { recursive: true });
         fs.writeFileSync(inboxFile, `${JSON.stringify(inbox, null, 2)}\n`);
       }
+      const sent = routed.length ? `; passed to card sessions: ${routed.join(", ")}` : "";
       result = count
-        ? { run: true, reason: `${count} new messages`, inbox: "tmp/inbox.json" }
-        : { run: false, reason: "no new messages" };
+        ? { run: true, reason: `${count} new messages${sent}`, inbox: "tmp/inbox.json", routed }
+        : { run: false, reason: `nothing for the replies run${sent}`, routed };
     } else {
       result = await sweepNeeded(store, call, clock);
     }
@@ -295,7 +327,10 @@ async function watch(home, token, { intervalSec = 60, sweepEveryMin = 30 } = {})
   for (;;) {
     const store = createStore(home);
     try {
-      const fresh = inboxKeys(await collectInbox(store, call)).filter((key) => !announced.has(key));
+      const inbox = await collectInbox(store, call);
+      // Card replies go straight to their sessions; dispatch starts them now.
+      if (routeInbox(store, inbox).length) tick({ home });
+      const fresh = inboxKeys(inbox).filter((key) => !announced.has(key));
       if (fresh.length) {
         fresh.forEach((key) => announced.add(key));
         signal("replies", `${fresh.length} new messages`);

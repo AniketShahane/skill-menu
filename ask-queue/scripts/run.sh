@@ -38,11 +38,10 @@ if ! flock -n 9; then
   exit 0
 fi
 
-# Workers: after every replies check (run or skip), start queued work and clean up finished runs.
-# No model, no tokens. 9>&- so workers don't inherit (and hold) the run lock.
-if [ "$MODE" = "replies" ]; then
-  trap 'node "$SKILL_DIR/scripts/dispatch.mjs" tick >>"$LOG" 2>&1 9>&- || true' EXIT
-fi
+# Card sessions: after every check (run or skip), start queued sessions (new asks to prep, routed
+# replies, work after "go") and clean up finished runs. No model, no tokens.
+# 9>&- so sessions don't inherit (and hold) the run lock.
+trap 'node "$SKILL_DIR/scripts/dispatch.mjs" tick >>"$LOG" 2>&1 9>&- || true' EXIT
 
 # Token-free check first: start Claude only when there is something to do (exit 10 = nothing new).
 # If the gate itself dies or hangs, fall back to the fixed schedule (`due`, no network).

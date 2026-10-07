@@ -6,23 +6,53 @@
 //   dispatch.mjs exec AQ-n   internal: supervise one worker run (tick spawns it detached)
 //   dispatch.mjs status      running and queued work (same as aq.mjs jobs)
 //
-// A worker is `claude -p` with the fail-closed worker guard (guard.mjs --worker), working in
-// <home>/jobs/AQ-n/work: a git worktree on branch aq/AQ-n when job.repo is set, else a plain
-// folder. Each item keeps one Claude session: the first run uses --session-id, follow-ups --resume.
+// Every card has one Claude session for its whole life: the first run (--session-id) preps the ask
+// and posts the card; every reply in the card thread, and the work after "go", resumes it (--resume).
+// A session is `claude -p` with the fail-closed worker guard (guard.mjs --worker), always started in
+// <home>/jobs/AQ-n/work (resume needs the same folder). Code work gets a git worktree on branch
+// aq/AQ-n-… at work/repo. Card runs (kind card) and work runs (kind work) have separate limits.
 
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SKILL_DIR, createStore, headlessSettings, listJobs, resolveHome, updateItem, workerConfig } from "./aq.mjs";
+import {
+  AFTER_CLOSE_WATCH_MS,
+  CARD_BRIEF,
+  SKILL_DIR,
+  TRANSITIONS,
+  createStore,
+  enteredStatusAt,
+  headlessSettings,
+  listJobs,
+  resolveHome,
+  updateItem,
+  workerConfig,
+} from "./aq.mjs";
 
 const POLL_MS = Number(process.env.ASK_QUEUE_POLL_MS) || 5000;
 const KILL_GRACE_MS = 10_000;
 // A worker that set `working` this recently may not have recorded its pid yet.
 const START_GRACE_MS = 60_000;
 
+// A prep run that ends without a posted card is retried this many times in all.
+const PREP_ATTEMPTS = 3;
+// Resting statuses a card run may leave the item in (ready/working are dispatch states).
+const RESTING = ["new", "asking", "approving", "drafted", "scoping", "review", "done", "filtered", "skipped"];
+
 const today = (now) => now.toISOString().slice(0, 10);
+
+// Outside the job folder, so a session can't rewrite its own guard settings or its post marker.
+export const settingsFile = (home, id) => path.join(home, "jobs", ".settings", `${id}.json`);
+export const cardPostMarker = (home, id) => path.join(home, "jobs", ".cardposts", id);
+
+// Per-run limits and model for the session's current kind.
+export function runLimits(config, kind) {
+  return kind === "work"
+    ? { model: config.model, effort: config.effort, budgetUsd: config.maxBudgetUsd, timeLimitMin: config.timeLimitMin }
+    : { model: config.cardModel, effort: config.cardEffort, budgetUsd: config.cardBudgetUsd, timeLimitMin: config.cardTimeLimitMin };
+}
 
 function patchJob(store, id, job, { status, note } = {}) {
   return updateItem(store, id, { patch: { job }, status, note, internal: true });
@@ -85,13 +115,15 @@ function slug(text) {
     .slice(0, 30) || "work";
 }
 
-// Job folder + workspace. A repo gets a worktree on a new local branch; nothing is ever pushed.
+// Job folder + workspace. The session always runs in work/ (resume finds sessions by folder).
+// A repo gets a worktree at work/repo on a new local branch; nothing is ever pushed.
 export function prepareWorkspace(home, item) {
   const jobDir = path.join(home, "jobs", item.id);
   const workDir = path.join(jobDir, "work");
-  fs.mkdirSync(jobDir, { recursive: true });
+  fs.mkdirSync(workDir, { recursive: true });
   const job = { dir: jobDir, workDir };
-  if (item.job.repo && !fs.existsSync(workDir)) {
+  const repoDir = path.join(workDir, "repo");
+  if (item.job.repo && !fs.existsSync(repoDir)) {
     const repo = path.resolve(item.job.repo);
     const branch = `aq/${item.id}-${slug(item.title)}`;
     const git = (...args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: "pipe" });
@@ -102,14 +134,49 @@ export function prepareWorkspace(home, item) {
     } catch {
       exists = false;
     }
-    if (exists) git("worktree", "add", workDir, branch);
-    else git("worktree", "add", "-b", branch, workDir, item.job.base || "HEAD");
+    if (exists) git("worktree", "add", repoDir, branch);
+    else git("worktree", "add", "-b", branch, repoDir, item.job.base || "HEAD");
     job.branch = branch;
+    job.repoDir = repoDir;
   }
-  fs.mkdirSync(workDir, { recursive: true });
   fs.writeFileSync(path.join(jobDir, "brief.md"), `# ${item.id}: ${item.title}\n\n${item.job.brief}\n`);
-  fs.writeFileSync(path.join(jobDir, "settings.json"), `${JSON.stringify(headlessSettings(home, item.id), null, 2)}\n`);
+  const settings = settingsFile(home, item.id);
+  fs.mkdirSync(path.dirname(settings), { recursive: true });
+  fs.writeFileSync(settings, `${JSON.stringify(headlessSettings(home, item.id), null, 2)}\n`);
   return job;
+}
+
+// New asks get their card session: queued to prep the ask and post its card.
+function queuePreps(store, now) {
+  const queued = [];
+  for (const item of store.allItems().filter((i) => i.status === "new")) {
+    const patch = {
+      job: { kind: "card", brief: item.job?.brief || CARD_BRIEF, restingStatus: "new" },
+    };
+    // An item brought back from the filtered digest still points at the digest thread: it needs its own card.
+    if (item.card) {
+      patch.previousCard = item.card;
+      patch.card = null;
+      fs.rmSync(cardPostMarker(store.paths.home, item.id), { force: true });
+    }
+    updateItem(store, item.id, { patch, status: "ready", note: "queued for its card session", internal: true }, () => now);
+    queued.push(item.id);
+  }
+  return queued;
+}
+
+// Closed cards keep their session for 48 hours (follow-ups resume it). After that, a reopened card
+// starts a fresh session.
+function expireSessions(store, now) {
+  const expired = [];
+  for (const item of store.allItems()) {
+    if (!["done", "skipped", "filtered"].includes(item.status)) continue;
+    if (!item.job?.sessionId || item.job.sessionExpired) continue;
+    if (now - Date.parse(enteredStatusAt(item)) < AFTER_CLOSE_WATCH_MS) continue;
+    patchJob(store, item.id, { sessionExpired: now.toISOString(), previousSessionId: item.job.sessionId, sessionId: null, sessionStarted: false });
+    expired.push(item.id);
+  }
+  return expired;
 }
 
 export function tick({ home = resolveHome(), clock, spawnSupervisor = defaultSpawn, alive = supervisorAlive } = {}) {
@@ -117,15 +184,19 @@ export function tick({ home = resolveHome(), clock, spawnSupervisor = defaultSpa
     const store = createStore(home);
     const now = clock ? clock() : new Date();
     const config = workerConfig(store);
-    const result = { reaped: [], started: [], waiting: [], failed: [] };
+    const result = { reaped: [], started: [], waiting: [], failed: [], prepQueued: [], expired: [] };
 
     for (const item of store.allItems().filter((i) => i.status === "working")) {
       const job = item.job || {};
       if (alive(job.pid, item.id)) continue;
       if (!job.pid && now - Date.parse(job.startedAt || 0) < START_GRACE_MS) continue;
-      patchJob(store, item.id, { pid: null, endedAt: now.toISOString(), notice: "The worker stopped unexpectedly (machine restart or crash). Say *continue* to resume it." }, { status: "review", note: "worker gone" });
+      const back = endStatus(item);
+      if (back === "new") fs.rmSync(cardPostMarker(home, item.id), { force: true });
+      patchJob(store, item.id, { pid: null, endedAt: now.toISOString(), notice: "The session stopped unexpectedly (machine restart or crash). Say *continue* to resume it." }, { status: back, note: "worker gone" });
       result.reaped.push(item.id);
     }
+    result.expired = expireSessions(store, now);
+    result.prepQueued = queuePreps(store, now);
 
     let running = store.allItems().filter((i) => i.status === "working").length;
     let { runs } = readCounter(home, now);
@@ -137,7 +208,7 @@ export function tick({ home = resolveHome(), clock, spawnSupervisor = defaultSpa
       const item = store.getItem(id);
       if (runs >= config.dailyRuns) {
         if (item.job.capNotice !== today(now)) {
-          patchJob(store, id, { capNotice: today(now), notice: `Today's worker limit (${config.dailyRuns} runs) is used up. It starts tomorrow.` });
+          patchJob(store, id, { capNotice: today(now), notice: `Today's session limit (${config.dailyRuns} runs) is used up. It starts tomorrow.` });
         }
         result.waiting.push(id);
         continue;
@@ -147,7 +218,7 @@ export function tick({ home = resolveHome(), clock, spawnSupervisor = defaultSpa
         patchJob(
           store,
           id,
-          { ...workspace, sessionId: item.job.sessionId || randomUUID(), startedAt: now.toISOString(), pid: null, runs: (item.job.runs || 0) + 1 },
+          { ...workspace, kind: item.job.kind || "card", sessionId: item.job.sessionId || randomUUID(), startedAt: now.toISOString(), pid: null, runs: (item.job.runs || 0) + 1 },
           { status: "working", note: "worker starting" },
         );
         spawnSupervisor(home, id);
@@ -157,7 +228,8 @@ export function tick({ home = resolveHome(), clock, spawnSupervisor = defaultSpa
         result.started.push(id);
       } catch (err) {
         const reason = String(err.stderr || err.message).trim().split("\n")[0].slice(0, 200);
-        patchJob(store, id, { notice: `Couldn't start the worker: ${reason}` }, { status: "scoping", note: "start failed" });
+        const back = item.job.restingStatus && TRANSITIONS.ready.includes(item.job.restingStatus) ? item.job.restingStatus : "scoping";
+        patchJob(store, id, { notice: `Couldn't start the session: ${reason}` }, { status: back, note: "start failed" });
         result.failed.push(id);
       }
     }
@@ -174,25 +246,57 @@ function defaultSpawn(home, id) {
   child.unref();
 }
 
-function workerPrompt(home, item, config) {
+export function workerPrompt(home, item, config) {
   const aq = path.join(SKILL_DIR, "scripts", "aq.mjs");
   const job = item.job;
-  const thread = `channel ${item.card?.channelId || config.slack?.selfDmId}, thread_ts ${item.card?.ts}`;
-  const head = `You are an ask-queue worker for ${item.id}: "${item.title}". This is unattended: nobody answers in this chat.`;
-  const where = `Job folder (the only place you may edit files or run commands): ${job.workDir}
-Card thread for every message (post only there, each starting with "🤖 ${item.id}"): ${thread}
-State CLI: node ${aq}   (write any --file input inside ${job.dir})`;
-  if (job.sessionStarted) {
-    return `${head}
-The user replied in the card thread:
-${job.lastFollowUp || "(no text: continue where you left off)"}
+  const selfDm = config.slack?.selfDmId;
+  const head = `You are the ask-queue card session for ${item.id}: "${item.title}". This is unattended: nobody answers in this chat. The user talks to you only through the card thread.`;
+  const post = item.card?.ts
+    ? `Card thread for every message (post only there, each starting with "🤖 ${item.id}"): channel ${item.card.channelId}, thread_ts ${item.card.ts}`
+    : `No card yet: post the card as ONE top-level message to channel ${selfDm} (no thread_ts), then record it with update (card.channelId, card.ts, card.lastSeenTs). After that, post only in its thread.`;
+  const where = `Job folder (the only place you may edit files or run commands; write --file inputs here): ${job.workDir}${
+    job.repoDir ? `\nCode: the git worktree at ${job.repoDir}, branch ${job.branch}` : ""
+  }
+${post}
+State CLI: node ${aq}   (your item: get ${item.id}; you may update only ${item.id})
+Skill: ${SKILL_DIR}`;
+  const replies = job.lastFollowUp ? `\nThe user's new messages in the card thread:\n${job.lastFollowUp}\n` : "";
+  const intro = job.sessionStarted ? "" : `Read ${SKILL_DIR}/SKILL.md and ${SKILL_DIR}/references/card-session.md first.\n`;
 
-Continue under the worker rules in ${SKILL_DIR}/references/work.md.
+  if (job.kind === "work") {
+    if (!job.workStarted) {
+      return `${head}
+${intro}The user said go. Do the work in the agreed brief (${job.dir}/brief.md) under the worker rules in ${SKILL_DIR}/references/work.md section 5.${replies}
+${where}`;
+    }
+    return `${head}
+${intro}${replies || "\n(no new text: continue where you left off)\n"}
+Continue under the worker rules in ${SKILL_DIR}/references/work.md section 5.
+${where}`;
+  }
+  if (!item.card?.ts) {
+    return `${head}
+${intro}Prep this ask and post its card (card-session.md section 1).${replies ? `\nNews that arrived before the card was posted:${replies}` : ""}
+${where}`;
+  }
+  if (!job.sessionStarted) {
+    return `${head}
+${intro}This card was posted before it had its own session: \`get ${item.id}\` for its history, then handle the reply (card-session.md section 2).${replies}
 ${where}`;
   }
   return `${head}
-Read ${SKILL_DIR}/references/work.md ("Worker rules") first, then the agreed brief: ${job.dir}/brief.md
+${replies || "\n(no new text: continue where you left off)\n"}
+Handle it under ${SKILL_DIR}/references/card-session.md section 2.
 ${where}`;
+}
+
+// Where a run that ended without setting a status leaves the item.
+function endStatus(item) {
+  const job = item.job || {};
+  if (job.kind === "work") return "review";
+  if (!item.card?.ts) return "new";
+  const back = job.restingStatus;
+  return back && RESTING.includes(back) && back !== "new" ? back : "review";
 }
 
 // Supervises one run: starts claude, enforces stop and the time limit, records how it ended.
@@ -203,29 +307,34 @@ export async function execJob(id, { home = resolveHome(), claudeBin = process.en
   if (item.status !== "working") return { skipped: `${id} is ${item.status}` };
   const followUp = item.job.followUp || null;
   item = patchJob(store, id, { pid: process.pid, followUp: null, lastFollowUp: followUp });
+  const kind = item.job.kind || "card";
+  const limits = runLimits(config, kind);
+  const prompt = workerPrompt(home, item, store.config());
+  if (kind === "work" && !item.job.workStarted) patchJob(store, id, { workStarted: new Date().toISOString() });
 
   const args = [
     "-p",
-    workerPrompt(home, item, store.config()),
+    prompt,
     "--model",
-    config.model,
+    limits.model,
+    ...(limits.effort ? ["--effort", limits.effort] : []),
     "--permission-mode",
     "dontAsk",
     "--settings",
-    path.join(item.job.dir, "settings.json"),
+    settingsFile(home, id),
     "--add-dir",
     SKILL_DIR,
     "--disallowedTools",
     "WebFetch",
     "WebSearch",
     "--max-budget-usd",
-    String(config.maxBudgetUsd),
+    String(limits.budgetUsd),
     "--output-format",
     "text",
     ...(item.job.sessionStarted ? ["--resume", item.job.sessionId] : ["--session-id", item.job.sessionId]),
   ];
   const log = fs.openSync(path.join(item.job.dir, "log.txt"), "a");
-  fs.writeSync(log, `=== ${new Date().toISOString()} run ${item.job.runs} ${item.job.sessionStarted ? "resume" : "start"}\n`);
+  fs.writeSync(log, `=== ${new Date().toISOString()} run ${item.job.runs} ${kind} ${item.job.sessionStarted ? "resume" : "start"} session ${item.job.sessionId}\n`);
   const child = spawn(claudeBin, args, {
     cwd: item.job.workDir,
     detached: true,
@@ -242,7 +351,7 @@ export async function execJob(id, { home = resolveHome(), claudeBin = process.en
       // already gone
     }
   };
-  const limitMs = config.timeLimitMin * 60 * 1000;
+  const limitMs = limits.timeLimitMin * 60 * 1000;
   const started = Date.now();
   const timer = setInterval(() => {
     if (reason) return;
@@ -268,25 +377,45 @@ export async function execJob(id, { home = resolveHome(), claudeBin = process.en
   fs.writeSync(log, `=== ${new Date().toISOString()} exit ${code}${reason ? ` (${reason})` : ""}\n`);
   fs.closeSync(log);
 
+  return finishRun(store, id, { code, reason, limits, home });
+}
+
+// Records how a run ended. A run normally ends by setting the card's next status itself.
+export function finishRun(store, id, { code, reason, limits, home }) {
   const fresh = store.getItem(id);
   const job = { pid: null, endedAt: new Date().toISOString(), exitCode: code, stopRequested: null };
   if (fresh.status !== "working") {
-    // The worker reported (review). A reply that came in meanwhile resumes it right away.
-    if (fresh.status === "review" && fresh.job.followUp && reason !== "stopped") {
-      return patchJob(store, id, job, { status: "ready", note: "follow-up arrived during the run" });
+    // A reply that came in during the run resumes the session right away.
+    if (fresh.status !== "ready" && fresh.job.followUp && reason !== "stopped" && TRANSITIONS[fresh.status]?.includes("ready")) {
+      return patchJob(store, id, { ...job, restingStatus: fresh.status }, { status: "ready", note: "follow-up arrived during the run" });
     }
     return patchJob(store, id, job);
   }
+  const back = endStatus(fresh);
+  if (back === "new") {
+    // The prep run posted no card. The guard's one-post marker is cleared so a retry can post.
+    fs.rmSync(cardPostMarker(home, id), { force: true });
+    const attempts = (fresh.job.prepAttempts || 0) + 1;
+    if (attempts < PREP_ATTEMPTS) {
+      return patchJob(store, id, { ...job, prepAttempts: attempts }, { status: "new", note: `prep run ended without a card (try ${attempts})` });
+    }
+    return patchJob(
+      store,
+      id,
+      { ...job, prepAttempts: attempts, notice: `Couldn't prep this ask after ${attempts} tries. Log: jobs/${id}/log.txt.` },
+      { status: "review", note: "prep failed" },
+    );
+  }
   const notices = {
     stopped: "Stopped. Say *continue* to pick it up again, or drop it.",
-    timeout: `Stopped at the ${config.timeLimitMin}-minute limit. Say *continue* to keep going.`,
+    timeout: `Stopped at the ${limits.timeLimitMin}-minute limit. Say *continue* to keep going.`,
   };
   job.notice =
     notices[reason] ||
     (code === 0
-      ? "The worker ended without posting a result. Say *continue* to retry."
-      : `The worker failed (exit ${code}) before reporting. Log: jobs/${id}/log.txt. Say *continue* to retry.`);
-  return patchJob(store, id, job, { status: "review", note: `worker ended: ${reason || `exit ${code}`}` });
+      ? "The session ended without posting a result. Say *continue* to retry."
+      : `The session failed (exit ${code}) before reporting. Log: jobs/${id}/log.txt. Say *continue* to retry.`);
+  return patchJob(store, id, job, { status: back, note: `session ended: ${reason || `exit ${code}`}` });
 }
 
 const isMain = process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);

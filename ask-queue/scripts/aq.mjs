@@ -10,35 +10,46 @@ import { fileURLToPath } from "node:url";
 
 export const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-// Work items (anything beyond a reply draft) go scoping → ready → working → review → done instead.
+// Every card lives in one Claude session (dispatch.mjs): `ready` = a run of that session is queued,
+// `working` = it is running. Between runs the item rests in asking/approving/drafted (reply cards)
+// or scoping/review (work cards). Work goes scoping → ready → working → review → done.
 export const WORK_STATUSES = ["scoping", "ready", "working", "review"];
 export const OPEN_STATUSES = ["new", "asking", "approving", "drafted", ...WORK_STATUSES];
 export const TRANSITIONS = {
-  new: ["asking", "approving", "scoping", "filtered", "skipped"],
-  asking: ["asking", "approving", "scoping", "filtered", "skipped"],
-  approving: ["asking", "approving", "drafted", "scoping", "filtered", "skipped"],
-  drafted: ["approving", "drafted", "done", "filtered", "skipped"],
+  // ready: dispatch.mjs queues the card session that preps the ask and posts its card.
+  new: ["asking", "approving", "scoping", "ready", "filtered", "skipped"],
+  asking: ["asking", "approving", "scoping", "ready", "filtered", "skipped"],
+  approving: ["asking", "approving", "drafted", "scoping", "ready", "filtered", "skipped"],
+  drafted: ["approving", "drafted", "done", "ready", "filtered", "skipped"],
   filtered: ["new", "asking", "approving", "scoping", "skipped"],
   scoping: ["scoping", "ready", "asking", "approving", "filtered", "skipped"],
-  // ready = the user said go; waits for a free worker slot (dispatch.mjs starts it).
+  // ready = a reply or "go" is waiting for its card session; dispatch.mjs starts it.
   ready: ["working", "scoping", "skipped"],
-  working: ["review", "skipped"],
+  // A run ends by setting the card's resting status (or ready: "go" queues the work run).
+  // new = the prep run could not post the card and will be retried.
+  working: ["new", "asking", "approving", "drafted", "scoping", "ready", "review", "done", "filtered", "skipped"],
   // review: the worker posted a result or a question. A reply sends it back to ready (resume).
   review: ["ready", "scoping", "done", "skipped"],
   // A reply on a closed card reopens it (follow-up input must never be lost).
   done: ["asking", "approving", "scoping", "ready"],
   skipped: ["asking", "approving", "scoping", "ready"],
 };
+// Session kinds: a card session drafts replies and scopes work; after "go" it does the work itself
+// (kind work), with the work budget and time limit.
+export const JOB_KINDS = ["card", "work"];
+export const CARD_BRIEF = "Card session: prep this ask, post its card, then handle every reply in its thread (references/card-session.md).";
+// "stop" in a card thread while its session runs stops the run (the gate can't read meaning).
+export const STOP_WORDS = /^\s*(stop|stop it|stop that|cancel|cancel that|hold on|pause)[\s.!]*$/i;
 // Statuses whose card threads are checked for replies every run.
 const WATCH_STATUSES = ["asking", "approving", "drafted", ...WORK_STATUSES];
 // Job fields the model may set through `update --file`. The rest belong to dispatch.mjs.
-const JOB_MODEL_KEYS = new Set(["brief", "repo", "base", "followUp", "notice", "result"]);
+const JOB_MODEL_KEYS = new Set(["brief", "repo", "base", "followUp", "notice", "result", "kind"]);
 // A type is offered for promotion after this many consecutive drafts went out unedited.
 export const PROMOTE_STREAK = 5;
 // Don't re-offer a declined promotion for a week.
 const PROPOSAL_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 // Filtered and closed items stay watchable for two days (unfilter, follow-ups after done/skip).
-const AFTER_CLOSE_WATCH_MS = 48 * 60 * 60 * 1000;
+export const AFTER_CLOSE_WATCH_MS = 48 * 60 * 60 * 1000;
 
 const DEFAULT_CONFIG = {
   timezone: null,
@@ -54,11 +65,15 @@ const DEFAULT_CONFIG = {
 
 // Background workers (dispatch.mjs). config.workers overrides any of these.
 export const WORKER_DEFAULTS = {
-  max: 5, // running at once
-  dailyRuns: 20, // worker starts and resumes per day
-  timeLimitMin: 60, // per run; the worker is stopped after this
-  maxBudgetUsd: 10, // per run (claude --max-budget-usd)
-  model: "opus",
+  max: 5, // sessions running at once
+  dailyRuns: 100, // session starts and resumes per day (every reply on a card is one)
+  timeLimitMin: 60, // per work run; the session is stopped after this
+  maxBudgetUsd: 10, // per work run (claude --max-budget-usd)
+  model: "opus", // work runs
+  cardTimeLimitMin: 20, // per card run (prep, a reply, a draft)
+  cardBudgetUsd: 5, // per card run
+  cardModel: "opus", // card runs
+  cardEffort: "medium", // card runs (claude --effort); work runs use the default effort
 };
 
 const DEFAULT_STATE = {
@@ -318,6 +333,9 @@ function applyUpdate(store, id, { patch = {}, status, note, internal = false } =
     if (typeof patch.job !== "object" || patch.job === null) throw new AqError("job must be an object");
     const bad = Object.keys(patch.job).filter((key) => !internal && !JOB_MODEL_KEYS.has(key));
     if (bad.length) throw new AqError(`job.${bad[0]} is managed by dispatch.mjs`);
+    if (patch.job.kind !== undefined && !JOB_KINDS.includes(patch.job.kind)) {
+      throw new AqError(`job.kind must be one of ${JOB_KINDS.join(", ")}`);
+    }
     // Merge, so setting job.followUp never wipes the session id.
     patch = { ...patch, job: { ...(item.job || {}), ...patch.job } };
   }
@@ -393,7 +411,7 @@ export function stopJob(store, id, clock) {
 }
 
 // When the item last entered its current status (not updatedAt, which every thread check bumps).
-function enteredStatusAt(item) {
+export function enteredStatusAt(item) {
   const event = [...item.history]
     .reverse()
     .find((h) => h.to === item.status || (h.event === "created" && h.status === item.status));
@@ -449,6 +467,46 @@ export function markSeen(store, channelId, threadTs, msgTs) {
     if (moved) updated.push(item.id);
   }
   return { updated };
+}
+
+function formatMessage(m) {
+  const stamp = m.ts ? `[${m.ts}${m.editedTs ? `, edited ${m.editedTs}` : ""}] ` : "";
+  const files = (m.files || []).map((f) => `\n  file: ${f.name || "file"} ${f.url || ""}`.trimEnd()).join("");
+  const cut = m.truncated ? "\n  (message cut off: read it in full from Slack)" : "";
+  return `${stamp}${String(m.text || "").trim()}${files}${cut}`;
+}
+
+// Hands the user's new messages in a card thread to that card's session: appended to job.followUp
+// (earlier text kept), and the item queued (ready) unless its session is already queued or running.
+// seenTs (optional) marks the thread handled up to that message. Used by gate.mjs and `aq route`.
+export function routeToCard(store, id, { messages, seenTs = null } = {}, clock) {
+  if (!Array.isArray(messages) || messages.length === 0) throw new AqError("route needs messages[]");
+  for (const m of messages) {
+    if (!m || typeof m.text !== "string") throw new AqError("each message needs text");
+  }
+  const text = messages.map(formatMessage).join("\n");
+  const item = withItemLock(store, id, () => {
+    const fresh = store.getItem(id);
+    if (fresh.status === "filtered") throw new AqError(`${id} is filtered: the replies run handles digest threads`);
+    const job = fresh.job || {};
+    const patch = {
+      job: {
+        followUp: [job.followUp, text].filter(Boolean).join("\n"),
+        kind: job.kind || "card",
+        brief: job.brief || CARD_BRIEF,
+      },
+    };
+    let status;
+    if (fresh.status === "working") {
+      if (messages.some((m) => STOP_WORDS.test(m.text))) patch.job.stopRequested = nowIso(clock);
+    } else if (fresh.status !== "ready" && fresh.status !== "new") {
+      status = "ready";
+      patch.job.restingStatus = fresh.status;
+    }
+    return applyUpdate(store, id, { patch, status, note: "user message for the card session", internal: true }, clock);
+  });
+  if (seenTs && item.card?.channelId && item.card?.ts) markSeen(store, item.card.channelId, item.card.ts, seenTs);
+  return summarize(store.getItem(id));
 }
 
 export function addLedger(store, entry, clock) {
@@ -651,6 +709,7 @@ const USAGE = `usage: aq.mjs <command>
   add --file <candidate.json>           create, merge or de-duplicate an ask
   list [--open] [--watch] [--status a,b]
   seen <channelId> <cardTs> <messageTs> mark user messages up to messageTs handled (forward-only)
+  route <id> --file <msgs.json>          pass card-thread messages to the card's session ({messages, seenTs})
   get <id>
   update <id> [--status s] [--file patch.json] [--note text]
   ledger add --file <entry.json> | ledger find <query> [--limit n]
@@ -716,6 +775,8 @@ export function run(argv, env = process.env, clock) {
       return store.getItem(positional[0]);
     case "seen":
       return markSeen(store, ...positional);
+    case "route":
+      return routeToCard(store, positional[0], readInputFile(home, flags.file), clock);
     case "update":
       return summarize(
         updateItem(
