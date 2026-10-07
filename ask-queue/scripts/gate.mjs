@@ -21,8 +21,9 @@ import { tick } from "./dispatch.mjs";
 
 export const EXIT_RUN = 0;
 export const EXIT_SKIP = 10;
-// Without a working check, run no more often than the old fixed schedule.
-const FALLBACK_MINUTES = { replies: 15, sweep: 120 };
+// Without a working check, run no more often than the old fixed schedule. Sweep is 14, not 15, so
+// cron's every-15-minutes sweep is never skipped by a few seconds of start-time jitter.
+const FALLBACK_MINUTES = { replies: 15, sweep: 14 };
 // Only these methods can be called, whatever the token's scopes allow.
 const READ_METHODS = new Set(["auth.test", "conversations.replies", "conversations.history", "search.messages"]);
 const REQUEST_TIMEOUT_MS = 15_000;

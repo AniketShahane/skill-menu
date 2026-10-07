@@ -50,13 +50,14 @@ connectors (Slack required; Jira, Zoom, Gmail optional) must already be connecte
 
 ```
 CRON_TZ=America/Los_Angeles
-7 8-20/2 * * 1-5  $HOME/.claude/skills/ask-queue/scripts/run.sh sweep
+1-59/15 8-20 * * 1-5  $HOME/.claude/skills/ask-queue/scripts/run.sh sweep
 */2 8-20 * * 1-5  $HOME/.claude/skills/ask-queue/scripts/run.sh replies
 ```
 
 The gate runs first every time. With a token, a reply in a card thread reaches that card's session
 in about 2 minutes, and a quiet check costs nothing. Without one, the gate lets replies through only
-every 15 minutes, as before.
+every 15 minutes, as before. Sweeps run every 15 minutes either way (odd minutes, so they never
+clash with a replies check on the shared lock).
 
 Every card has its own Claude session. After every check (sweep or replies, run or skipped),
 `scripts/dispatch.mjs tick` (no model) starts queued sessions: new asks to prep, cards with new
