@@ -72,7 +72,7 @@ stale. Don't store sensitive personal details (health, compensation, performance
   offer (cards.md) as a top-level message, then `$AQ propose <type> --ts <message ts>`. At most one
   offer per sweep.
 - `demoteSuggested: true` (a promoted type's last two drafts were both edited): `$AQ demote <type>`
-  and tell the user in one line (`🤖 Went back to asking first for *share-link*: your last two edits
+  and tell the user in one line (`🤖 💡 **Back to asking first for share-link drafts.** Your last two edits
   suggest I'm missing something.`).
 
 Promotion only removes the question step for that type. Drafts are still drafts; the user still sends.

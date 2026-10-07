@@ -86,7 +86,8 @@ async function paged(call, method, params) {
   throw new Error(`${method}: more than ${PAGE_CAP} pages`);
 }
 
-const fromBot = (text) => String(text || "").trimStart().startsWith("🤖");
+// Slack stores the posted 🤖 as the shortcode ":robot_face:", so accept both.
+const fromBot = (text) => /^(🤖|:robot_face:)/u.test(String(text || "").trimStart());
 
 function isNew(msg, mark) {
   if (compareTs(msg.ts, mark) > 0) return true;

@@ -252,7 +252,7 @@ export function workerPrompt(home, item, config) {
   const selfDm = config.slack?.selfDmId;
   const head = `You are the ask-queue card session for ${item.id}: "${item.title}". This is unattended: nobody answers in this chat. The user talks to you only through the card thread.`;
   const post = item.card?.ts
-    ? `Card thread for every message (post only there, each starting with "🤖 ${item.id}"): channel ${item.card.channelId}, thread_ts ${item.card.ts}`
+    ? `Card thread for every message (post only there, each starting with "🤖" and naming ${item.id}, formatted per references/cards.md): channel ${item.card.channelId}, thread_ts ${item.card.ts}`
     : `No card yet: post the card as ONE top-level message to channel ${selfDm} (no thread_ts), then record it with update (card.channelId, card.ts, card.lastSeenTs). After that, post only in its thread.`;
   const where = `Job folder (the only place you may edit files or run commands; write --file inputs here): ${job.workDir}${
     job.repoDir ? `\nCode: the git worktree at ${job.repoDir}, branch ${job.branch}` : ""

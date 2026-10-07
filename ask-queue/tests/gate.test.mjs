@@ -115,6 +115,22 @@ test("replies: top level keeps the user's plain messages only", async () => {
   assert.equal(slack.calls.find((c) => c.method === "conversations.history").params.oldest, "300.0");
 });
 
+test("replies: Slack's :robot_face: shortcode counts as a bot post", async () => {
+  const { home, store } = freshHome();
+  const state = store.state();
+  state.checkpoints["replies:selfdm"] = "500.0";
+  store.saveState(state);
+  const slack = fakeSlack({
+    history: [
+      me("500.3", ":robot_face: :large_yellow_circle: **AQ-9 · 2 questions for you**"),
+      me("500.2", "🤖 🧹 **Filtered 1** (not asks for you)"),
+      me("500.1", "remind me about the offsite"),
+    ],
+  });
+  await decide("replies", { home, token: TOKEN, fetchImpl: slack.fetchImpl, clock });
+  assert.deepEqual(inbox(home).topLevel.map((m) => m.text), ["remind me about the offsite"]);
+});
+
 test("replies: nothing new means no Claude run and no inbox file", async () => {
   const { home, store } = freshHome();
   cardItem(store, "asking", { channelId: "D_ME", ts: "400.0", lastSeenTs: "400.2" });

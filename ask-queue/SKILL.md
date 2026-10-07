@@ -52,7 +52,8 @@ schedule (replies 15m, sweep 2h), and the replies run passes card-thread replies
 4. **State changes only through `$AQ`** (items, ledger, checkpoints, config) or file edits under
    `memory/`, `tmp/` and `artifacts/` in the data directory. Write JSON inputs to `tmp/` and pass them
    with `--file`; never put free text or `$` in shell arguments.
-5. **Mark everything you post** with `🤖 AQ-<n>` (or `🤖` for digests). Messages without 🤖 are the
+5. **Mark everything you post**: `🤖` first, then the item id (`🤖 🟡 **AQ-<n> · …**`), layout and
+   formatting per [cards.md](references/cards.md). Messages without 🤖 are the
    user's.
 6. **Denied tool calls are final.** Headless runs go through `scripts/guard.mjs`, which blocks
    anything that is not a read or a draft. If a call is denied, don't try another route; note it.

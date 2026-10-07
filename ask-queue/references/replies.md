@@ -47,7 +47,7 @@ card session preps it and posts a fresh card. Confirm in the digest thread.
 Promotion thread: a yes → `$AQ promote <type>` and confirm. Anything else → `$AQ decline <type>`
 and confirm (it won't be offered again for a week).
 
-**Session notices:** post each as `🤖 AQ-n · <notice>` in its card thread (top-level when the item
+**Session notices:** post each as `🤖 ℹ️ **AQ-n ·** <notice>` in its card thread (top-level when the item
 has no card), then clear it with `{"job": {"notice": null}}` through `$AQ update AQ-n --file`.
 
 ## 3. Top-level messages

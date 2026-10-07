@@ -83,6 +83,6 @@ for new asks come from their card sessions.
 2. For each source that succeeded: `$AQ checkpoint set <source> <sweepStartedAt>`. Leave a failed
    source's checkpoint alone so the next sweep retries the same window.
 3. Source failures: at most once per day per source (`$AQ checkpoint get alert:<source>` is today's
-   date → stay quiet), post `🤖 ⚠️ Sweep: <source> unavailable (<short reason>)` and set
+   date → stay quiet), post `🤖 ⚠️ **Sweep: <source> unavailable** (<short reason>)` and set
    `alert:<source>` to today's date.
 4. `$AQ checkpoint set sweep:last <sweepStartedAt>`.

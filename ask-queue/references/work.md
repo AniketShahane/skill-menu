@@ -40,7 +40,7 @@ Save `prep` and `questions`, then `$AQ update AQ-n --status scoping --file <job 
 ## 3. Q&A in the thread (card session runs)
 
 - Answers: record `questions[].answer`. A new open decision: ask it, stay `scoping`.
-- Changes to the deliverables: update the card text in a reply (`🤖 AQ-n · Updated plan:` …).
+- Changes to the deliverables: update the card text in a reply (`🤖 🔵 **AQ-n · Updated plan**` …, cards.md).
 - **Go** ("go", "ok do it", "start", "👍" with nothing open): write the agreed brief, then set
   `ready`. If questions are still open, "go" accepts their guesses.
 
@@ -57,7 +57,7 @@ It must stand alone. Write `job` to `<job folder>/AQ-n.json`:
 
 `repo` only for code work (`base` optionally names the branch to start from; default: the repo's
 current HEAD). Then `$AQ update AQ-n --status ready --file <that file>`, check `$AQ jobs`, reply
-`🤖 AQ-n · Starting.` or `🤖 AQ-n · Queued (2nd in line, 5 running).`, and end this run.
+`🤖 🟣 **AQ-n · Starting.**` or `🤖 🟣 **AQ-n · Queued** (2nd in line, 5 running).`, and end this run.
 
 `scripts/dispatch.mjs` (no model) resumes your session for the work within about 2 minutes, with
 the work limits: up to `workers.max` (5) sessions at once, a daily cap (`workers.dailyRuns`), a time
@@ -89,15 +89,14 @@ arrive in your prompt on resume.
    Commit as you go with plain messages. Never push; the user pushes.
 3. **Docs:** Drive `create_file` (no parent folder) for a private Google Doc titled `[Draft] …`.
 4. **Post only in your card thread** (`slack_send_message` with `channel_id` and `thread_ts`
-   from the prompt), each message starting with `🤖 AQ-n`. Keep it to:
-   - `🤖 AQ-n · Started: <one line plan>` (first work run only),
+   from the prompt), each message starting with `🤖` and naming `AQ-n` (cards.md). Keep it to:
+   - `🤖 🟣 **AQ-n · Started:** <one line plan>` (first work run only),
    - at most one progress line on long work,
    - the result (below), or a question.
 5. **A real question mid-work** (one that changes the result, not one you can make a labeled guess
    on): post it with your best guess, then set review (step 7) and end. The answer resumes you.
-6. **Result message:** what you made (links, file paths, branch name, how to run it), what you
-   checked, and any guesses you made. Short enough for a phone. Then: "Reply with changes, or
-   *looks good*."
+6. **Result message** (`🤖 🟠 **AQ-n · Done, please review**`, layout per cards.md): what you made (links, file paths, branch name, how to run it), what you
+   checked, and any guesses you made. Short enough for a phone. End with `👉 Reply with changes, or **looks good**.`
 7. **Finish every work run** by writing `{"job": {"result": {"summary": "…", "links": […], "branch": "…"}}}`
    to `result.json` in your job folder, and running
    `node <aq> update AQ-n --status review --file <its absolute path>`. A run that ends without
