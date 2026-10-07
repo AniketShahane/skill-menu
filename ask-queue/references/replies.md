@@ -1,8 +1,9 @@
 # Replies
 
-Card threads are not handled here: each card's own session handles its replies
-([card-session.md](card-session.md)), and `scripts/gate.mjs` passes them on without starting Claude.
-This run handles what belongs to no single card: top-level messages in the self-DM, replies under
+Card replies are answered by each card's own session ([card-session.md](card-session.md)), not here.
+Getting them there is: with an inbox file, `scripts/gate.mjs` already passed them on. **Without one,
+you must read every watched thread yourself** (step 1) and pass card replies on with `$AQ route`:
+skip that and the user's replies are never answered. This run also handles what belongs to no single card: top-level messages in the self-DM, replies under
 them, the shared filtered digest, promotion offers, and session notices. Then learn
 ([learn.md](learn.md)). The user writes plain language, never commands: work out what they mean.
 

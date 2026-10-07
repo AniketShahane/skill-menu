@@ -68,6 +68,8 @@ INBOX="$ASK_QUEUE_HOME/tmp/inbox.json"
 INBOX_LINE=""
 if [ "$MODE" = "replies" ] && [ -f "$INBOX" ]; then
   INBOX_LINE="Inbox file (new messages, from gate.mjs): $INBOX"
+elif [ "$MODE" = "replies" ]; then
+  INBOX_LINE="No inbox file: find new messages yourself (replies.md step 1), reading every thread from aq list --watch and passing card replies on with aq route."
 fi
 
 MODEL="$(node "$AQ" config get "models.$MODE" | tr -d '"')"
