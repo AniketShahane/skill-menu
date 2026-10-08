@@ -203,4 +203,8 @@ test("trustJobsFolder: trusts jobs/ once, and not at all under a trusted parent"
   assert.equal(saved.keep, 1);
   assert.equal(saved.projects["/data/aq/jobs"].hasTrustDialogAccepted, true);
   assert.equal(trustJobsFolder("/elsewhere/aq", file), false, "a trusted parent covers it");
+  const other = path.join(dir, "other.json");
+  fs.writeFileSync(other, "{}");
+  assert.equal(trustJobsFolder("/data/aq", [file, other]), true, "every config file gets it");
+  assert.equal(JSON.parse(fs.readFileSync(other, "utf8")).projects["/data/aq/jobs"].hasTrustDialogAccepted, true);
 });

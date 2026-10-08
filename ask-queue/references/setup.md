@@ -65,8 +65,10 @@ replies, work after "go". Each session is a background `claude --bg` session nam
 `AQ-n · <title>`, so it shows in Claude Code's agent view (`claude agents`): under "working" while a
 round runs, then under "completed" (it's stopped between rounds so it doesn't hold memory). It runs
 in its own folder under `~/.local/share/ask-queue/jobs/AQ-n/work` and is resumed there for every
-round. Background sessions only start in trusted folders, so the first run marks `jobs/` as trusted
-in your claude config. Each session has a fail-closed
+round. Background sessions only start (and only run the guard hook) in trusted folders, so the
+first run marks `jobs/` as trusted in every claude config file (`~/.claude.json`, and
+`$CLAUDE_CONFIG_DIR/.claude.json` or `~/.claude/.claude.json`): cron and the background daemon can
+read different ones. Each session has a fail-closed
 guard: edits and commands only in that folder (plus memory notes), `aq.mjs` changes only to its own
 item, Slack posts only in its card thread (plus posting the card itself once), no network commands
 and no push. Limits live in `config.workers`: `max` 5 sessions at once, `dailyRuns` 100 runs a day;

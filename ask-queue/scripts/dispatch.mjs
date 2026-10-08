@@ -306,15 +306,29 @@ export function sessionName(item) {
   return name.length > 60 ? `${name.slice(0, 59)}…` : name;
 }
 
-// The config file the claude CLI reads (and keeps folder trust in) when started from here.
-export function claudeConfigFile(env = process.env) {
-  if (env.ASK_QUEUE_CLAUDE_JSON) return env.ASK_QUEUE_CLAUDE_JSON;
-  return env.CLAUDE_CONFIG_DIR ? path.join(env.CLAUDE_CONFIG_DIR, ".claude.json") : path.join(os.homedir(), ".claude.json");
+// The config files claude may keep folder trust in. Which one a process reads depends on its
+// CLAUDE_CONFIG_DIR, and the background daemon that hosts the sessions (and the agent view) can be
+// started with a different one than cron, so trust has to be in all of them.
+export function claudeConfigFiles(env = process.env) {
+  if (env.ASK_QUEUE_CLAUDE_JSON) return [env.ASK_QUEUE_CLAUDE_JSON];
+  const files = [
+    env.CLAUDE_CONFIG_DIR && path.join(env.CLAUDE_CONFIG_DIR, ".claude.json"),
+    path.join(os.homedir(), ".claude", ".claude.json"),
+    path.join(os.homedir(), ".claude.json"),
+  ].filter(Boolean);
+  const existing = [...new Set(files)].filter((file) => fs.existsSync(file));
+  return existing.length ? existing : [path.join(os.homedir(), ".claude.json")];
 }
 
-// Background sessions only start in trusted folders. Trusting jobs/ once covers every card's folder.
-export function trustJobsFolder(home, file = claudeConfigFile()) {
-  const dir = path.join(home, "jobs");
+// Background sessions only start in trusted folders, and an untrusted folder also skips the
+// settings hooks (so the guard never allows anything). Trusting jobs/ once covers every card.
+export function trustJobsFolder(home, files = claudeConfigFiles()) {
+  let changed = false;
+  for (const file of [files].flat()) changed = trustIn(file, path.join(home, "jobs")) || changed;
+  return changed;
+}
+
+function trustIn(file, dir) {
   let config = {};
   try {
     config = JSON.parse(fs.readFileSync(file, "utf8"));
