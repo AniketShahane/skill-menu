@@ -72,8 +72,12 @@ read different ones. Each session has a fail-closed
 guard: edits and commands only in that folder (plus memory notes), `aq.mjs` changes only to its own
 item, Slack posts only in its card thread (plus posting the card itself once), no network commands
 and no push. Limits live in `config.workers`: `max` 5 sessions at once, `dailyRuns` 100 runs a day;
-card runs `cardModel` opus, `cardEffort` medium, `cardTimeLimitMin` 20; work runs `model` opus,
-`timeLimitMin` 60. There's no per-run dollar cap: `claude --max-budget-usd` only works in `-p` mode. Change one with `$AQ config set workers.max 3`. A closed
+card runs `cardModel` sonnet, `cardEffort` medium, `cardTimeLimitMin` 20; work runs `model` opus,
+`timeLimitMin` 60. There's no per-run dollar cap: `claude --max-budget-usd` only works in `-p` mode.
+Change one with `$AQ config set workers.max 3`. Sweep and replies runs use `config.models` (both
+sonnet). A model name (`opus`, `sonnet`, `haiku`) in any card reply switches that card's sessions to
+it until changed; the card shows its model on a 🧠 line. A card session reacts 👀 to each of your
+card-thread messages when it reads them. A closed
 card keeps its session for 48 hours. Code work uses a git worktree at `jobs/AQ-n/work/repo` on a
 local branch `aq/AQ-n-…`; when you're done with it, push the branch yourself and remove the
 worktree with `git worktree remove`.

@@ -39,6 +39,11 @@ export const TRANSITIONS = {
 export const JOB_KINDS = ["card", "work"];
 export const CARD_BRIEF = "Card session: prep this ask, post its card, then handle every reply in its thread (references/card-session.md).";
 // "stop" in a card thread while its session runs stops the run (the gate can't read meaning).
+// A model name in a card reply switches that card's sessions to it (it sticks until changed).
+export function modelIn(text) {
+  const found = String(text || "").toLowerCase().match(/\b(opus|sonnet|haiku)\b/g);
+  return found ? found.at(-1) : null;
+}
 export const STOP_WORDS = /^\s*(stop|stop it|stop that|cancel|cancel that|hold on|pause)[\s.!]*$/i;
 // Statuses whose card threads are checked for replies every run.
 const WATCH_STATUSES = ["asking", "approving", "drafted", ...WORK_STATUSES];
@@ -57,7 +62,7 @@ const DEFAULT_CONFIG = {
   jira: { cloudId: null, accountId: null, projects: [] },
   gmail: { account: null },
   sources: { slack: true, jira: false, zoom: false, gmail: false },
-  models: { sweep: "opus", replies: "sonnet" },
+  models: { sweep: "sonnet", replies: "sonnet" },
   // gate.mjs: force a full sweep after this many quiet hours (reconcile drafts, learn).
   gate: { maxQuietHours: 6 },
   workers: {},
@@ -68,9 +73,9 @@ export const WORKER_DEFAULTS = {
   max: 5, // sessions running at once
   dailyRuns: 100, // session starts and resumes per day (every reply on a card is one)
   timeLimitMin: 60, // per work run; the session is stopped after this
-  model: "opus", // work runs
+  model: "opus", // work runs (after "go")
   cardTimeLimitMin: 20, // per card run (prep, a reply, a draft)
-  cardModel: "opus", // card runs
+  cardModel: "sonnet", // card runs
   cardEffort: "medium", // card runs (claude --effort); work runs use the default effort
 };
 
@@ -494,6 +499,8 @@ export function routeToCard(store, id, { messages, seenTs = null } = {}, clock) 
         brief: job.brief || CARD_BRIEF,
       },
     };
+    const model = messages.map((m) => modelIn(m.text)).filter(Boolean).at(-1);
+    if (model) patch.job.model = model;
     let status;
     if (fresh.status === "working") {
       if (messages.some((m) => STOP_WORDS.test(m.text))) patch.job.stopRequested = nowIso(clock);

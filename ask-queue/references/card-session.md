@@ -56,6 +56,13 @@ prompt: fold it into the prep.
 
 ## 2. Later runs: the user replied
 
+**First, mark them read:** `slack_add_reaction` with emoji `eyes` on each new message (channel =
+the card's channel, `message_ts` = the ts in brackets before it). Then handle them.
+
+**A model name** (`opus`, `sonnet`, `haiku`) in a reply already switched this card's model (aq route
+did it; this run uses it). Confirm in one line, `🤖 🧠 **AQ-n · Now on Sonnet**`, and do the rest
+of the reply. A reply that is only the model name needs nothing else.
+
 Read generously: users type fast on phones, and one reply can carry several things ("yes, but say
 Friday, and remember Sam is out next week"). Do all of them. The table lists common meanings, not
 required words. Work cards (`scoping`, `review`) follow [work.md](work.md) sections 3–4.

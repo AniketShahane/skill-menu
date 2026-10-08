@@ -139,6 +139,11 @@ function decideMcp(name, input, ctx) {
   if (!parts) return deny("unrecognized MCP tool name");
   const { server, tool } = parts;
 
+  // A worker marks the user's card-thread messages as read with a reaction (its card's DM only).
+  if (server.includes("slack") && tool === "slack_add_reaction" && ctx.workerId) {
+    if (ctx.card?.channelId && input?.channel_id === ctx.card.channelId) return allow("worker reacts in its card's DM");
+    return deny("a worker may only react to messages in its card's DM");
+  }
   if (server.includes("slack") && tool === "slack_send_message" && ctx.workerId) {
     const card = ctx.card;
     if (card?.ts) {

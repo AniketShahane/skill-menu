@@ -184,6 +184,9 @@ test("worker guard: job folder only, own thread only, no push or network", () =>
   assert.equal(call(send, { channel_id: "C9", thread_ts: "1.5", message: "hi" }), "deny");
   assert.equal(call("mcp__claude_ai_Slack__slack_send_message_draft", { channel_id: "C9" }), "allow");
   assert.equal(call("mcp__claude_ai_Gmail__send_message", {}), "deny");
+  const react = "mcp__claude_ai_Slack__slack_add_reaction";
+  assert.equal(call(react, { channel_id: "D1", message_ts: "9.1", emoji: "eyes" }), "allow");
+  assert.equal(call(react, { channel_id: "C9", message_ts: "9.1", emoji: "eyes" }), "deny");
 });
 
 test("sessionName: card id and title, short enough for the agent view", () => {

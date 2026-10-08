@@ -48,11 +48,14 @@ const today = (now) => now.toISOString().slice(0, 10);
 export const settingsFile = (home, id) => path.join(home, "jobs", ".settings", `${id}.json`);
 export const cardPostMarker = (home, id) => path.join(home, "jobs", ".cardposts", id);
 
-// Per-run limits and model for the session's current kind.
-export function runLimits(config, kind) {
-  return kind === "work"
-    ? { model: config.model, effort: config.effort, timeLimitMin: config.timeLimitMin }
-    : { model: config.cardModel, effort: config.cardEffort, timeLimitMin: config.cardTimeLimitMin };
+// Per-run limits and model for the session's current kind. A model the user named in the card
+// thread (job.model, set by aq route) wins over the default.
+export function runLimits(config, kind, job = {}) {
+  const limits =
+    kind === "work"
+      ? { model: config.model, effort: config.effort, timeLimitMin: config.timeLimitMin }
+      : { model: config.cardModel, effort: config.cardEffort, timeLimitMin: config.cardTimeLimitMin };
+  return job.model ? { ...limits, model: job.model } : limits;
 }
 
 function patchJob(store, id, job, { status, note } = {}) {
@@ -247,11 +250,12 @@ function defaultSpawn(home, id) {
   child.unref();
 }
 
-export function workerPrompt(home, item, config) {
+export function workerPrompt(home, item, config, model = "the default model") {
   const aq = path.join(SKILL_DIR, "scripts", "aq.mjs");
   const job = item.job;
   const selfDm = config.slack?.selfDmId;
-  const head = `You are the ask-queue card session for ${item.id}: "${item.title}". This is unattended: nobody answers in this chat. The user talks to you only through the card thread.`;
+  const head = `You are the ask-queue card session for ${item.id}: "${item.title}". This is unattended: nobody answers in this chat. The user talks to you only through the card thread.
+This run uses ${model}: say so on the card (cards.md). If the user's new messages switch the model, confirm it in one short line.`;
   const post = item.card?.ts
     ? `Card thread for every message (post only there, each starting with "🤖" and naming ${item.id}, formatted per references/cards.md): channel ${item.card.channelId}, thread_ts ${item.card.ts}`
     : `No card yet: post the card as ONE top-level message to channel ${selfDm} (no thread_ts), then record it with update (card.channelId, card.ts, card.lastSeenTs). After that, post only in its thread.`;
@@ -261,7 +265,9 @@ export function workerPrompt(home, item, config) {
 ${post}
 State CLI: node ${aq}   (your item: get ${item.id}; you may update only ${item.id})
 Skill: ${SKILL_DIR}`;
-  const replies = job.lastFollowUp ? `\nThe user's new messages in the card thread:\n${job.lastFollowUp}\n` : "";
+  const replies = job.lastFollowUp
+    ? `\nThe user's new messages in the card thread (first, react "eyes" to each, by the ts in brackets, so they know it was read):\n${job.lastFollowUp}\n`
+    : "";
   const intro = job.sessionStarted ? "" : `Read ${SKILL_DIR}/SKILL.md and ${SKILL_DIR}/references/card-session.md first.\n`;
 
   if (job.kind === "work") {
@@ -376,15 +382,15 @@ export async function execJob(id, { home = resolveHome(), claudeBin = process.en
   const followUp = item.job.followUp || null;
   item = patchJob(store, id, { pid: process.pid, followUp: null, lastFollowUp: followUp });
   const kind = item.job.kind || "card";
-  const limits = runLimits(config, kind);
-  const prompt = workerPrompt(home, item, store.config());
+  const limits = runLimits(config, kind, item.job);
+  const prompt = workerPrompt(home, item, store.config(), limits.model);
   if (kind === "work" && !item.job.workStarted) patchJob(store, id, { workStarted: new Date().toISOString() });
 
   const opts = { cwd: item.job.workDir, env: { ...process.env, ASK_QUEUE_HOME: home, ASK_QUEUE_JOB: id } };
   const resume = item.job.sessionStarted && item.job.sessionId;
   // A background session keeps the options it was started with. Passing new ones (a card session
-  // turning into a work run) starts a copy with the full history under a new id.
-  const sameOptions = resume && item.job.bgKind === kind;
+  // turning into a work run, or a new model) starts a copy with the full history under a new id.
+  const sameOptions = resume && item.job.bgKind === kind && item.job.bgModel === limits.model;
   const args = sameOptions
     ? ["--bg", "--resume", item.job.sessionId, "--", prompt]
     : [
@@ -424,7 +430,7 @@ export async function execJob(id, { home = resolveHome(), claudeBin = process.en
     code = err.status || 1;
   }
   if (!bgId) return finishRun(store, id, { code: code || 1, reason: null, limits, home });
-  patchJob(store, id, { sessionStarted: true, bgId, bgKind: kind });
+  patchJob(store, id, sameOptions ? { sessionStarted: true, bgId } : { sessionStarted: true, bgId, bgKind: kind, bgModel: limits.model });
 
   let reason = null;
   let missing = 0;

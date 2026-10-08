@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { CARD_BRIEF, TRANSITIONS, routeToCard, updateItem } from "../scripts/aq.mjs";
-import { cardPostMarker, execJob, settingsFile, tick, workerPrompt } from "../scripts/dispatch.mjs";
+import { CARD_BRIEF, TRANSITIONS, modelIn, routeToCard, updateItem } from "../scripts/aq.mjs";
+import { cardPostMarker, execJob, runLimits, settingsFile, tick, workerPrompt } from "../scripts/dispatch.mjs";
 import { decide as gateDecide } from "../scripts/gate.mjs";
 import { decide as guardDecide, makeContext } from "../scripts/guard.mjs";
 import { SELF_DM, USER, addItem, fakeBgClaude, makeHome, setStatus, withCard } from "./helpers.mjs";
@@ -215,7 +215,7 @@ test("dispatch: every reply resumes the same session", async () => {
   assert.equal(first[first.indexOf("--name") + 1], `${id} · ${item.title}`, "named after the card in the agent view");
   assert.equal(second[second.indexOf("--resume") + 1], sessionId);
   assert.ok(second.join("\n").includes("[601.1] yes"), "the new reply is in the resume prompt");
-  assert.equal(first[first.indexOf("--model") + 1], "opus");
+  assert.equal(first[first.indexOf("--model") + 1], "sonnet", "card runs default to sonnet");
   assert.equal(first[first.indexOf("--effort") + 1], "medium");
   item = store.getItem(id);
   assert.equal(item.job.runs, 2);
@@ -357,4 +357,41 @@ test("dispatch: a closed card keeps its session for 48 hours, then a reopen star
   const item = store.getItem(id);
   assert.equal(item.job.sessionId, null);
   assert.equal(item.job.previousSessionId, "S1");
+});
+
+test("modelIn: the last model named in a reply, whole words only", () => {
+  assert.equal(modelIn("go opus"), "opus");
+  assert.equal(modelIn("Sonnet: make it shorter"), "sonnet");
+  assert.equal(modelIn("try haiku, no wait, opus"), "opus");
+  assert.equal(modelIn("make it shorter"), null);
+  assert.equal(modelIn("magnum opuses"), null);
+});
+
+test("route: a model name in a reply switches the card's model; dispatch uses it", async () => {
+  const { home, store } = makeHome();
+  const id = addItem(store);
+  setStatus(store, id, "asking");
+  withCard(store, id);
+  routeToCard(store, id, { messages: [{ ts: "600.1", text: "ok, use haiku for this" }] });
+  assert.equal(store.getItem(id).job.model, "haiku");
+  assert.equal(runLimits({ cardModel: "sonnet", model: "opus" }, "card", store.getItem(id).job).model, "haiku");
+  assert.equal(runLimits({ cardModel: "sonnet", model: "opus" }, "work", {}).model, "opus");
+
+  const claudeBin = fakeClaude(home);
+  tick({ home, spawnSupervisor: noSpawn });
+  await execJob(id, { home, claudeBin });
+  routeToCard(store, id, { messages: [{ ts: "601.1", text: "shorter" }] });
+  assert.equal(store.getItem(id).job.model, "haiku", "it sticks");
+  tick({ home, spawnSupervisor: noSpawn });
+  await execJob(id, { home, claudeBin });
+  routeToCard(store, id, { messages: [{ ts: "602.1", text: "opus please" }] });
+  tick({ home, spawnSupervisor: noSpawn });
+  await execJob(id, { home, claudeBin });
+
+  const [first, second, third] = runsOf(home);
+  assert.equal(first[first.indexOf("--model") + 1], "haiku");
+  assert.ok(!second.includes("--model"), "same model: resumed with its saved options");
+  assert.equal(third[third.indexOf("--model") + 1], "opus", "new model: started with new options");
+  assert.ok(third.join("\n").includes("This run uses opus"));
+  assert.ok(third.join("\n").includes('react "eyes"'));
 });
