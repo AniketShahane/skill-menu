@@ -61,8 +61,8 @@ current HEAD). Then `$AQ update AQ-n --status ready --file <that file>`, check `
 
 `scripts/dispatch.mjs` (no model) resumes your session for the work within about 2 minutes, with
 the work limits: up to `workers.max` (5) sessions at once, a daily cap (`workers.dailyRuns`), a time
-limit per work run (`workers.timeLimitMin`) and a cost cap per work run (`workers.maxBudgetUsd`).
-Card runs (prep, replies) have smaller ones (`workers.cardTimeLimitMin`, `workers.cardBudgetUsd`).
+limit per work run (`workers.timeLimitMin`). Card runs (prep, replies) have a shorter one
+(`workers.cardTimeLimitMin`).
 
 ## 4. Replies while it runs or after it reports
 

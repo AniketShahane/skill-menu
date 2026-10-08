@@ -6,8 +6,9 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { addCandidate, createStore, updateItem } from "../scripts/aq.mjs";
-import { execJob, settingsFile, tick } from "../scripts/dispatch.mjs";
+import { execJob, sessionName, settingsFile, tick, trustJobsFolder } from "../scripts/dispatch.mjs";
 import { decide, makeContext } from "../scripts/guard.mjs";
+import { fakeBgClaude } from "./helpers.mjs";
 
 const AQ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts", "aq.mjs");
 process.env.ASK_QUEUE_POLL_MS = "50";
@@ -43,7 +44,7 @@ if (${JSON.stringify(mode)} === "hang") setInterval(() => {}, 1000);
 `,
   );
   fs.chmodSync(file, 0o755);
-  return file;
+  return fakeBgClaude(home, file);
 }
 
 const calls = (home) =>
@@ -112,8 +113,8 @@ test("exec: first run uses --session-id, a follow-up resumes the same session", 
   process.env.ASK_QUEUE_HOME = home;
   const claudeBin = fakeClaude(home, "report");
   tick({ home, spawnSupervisor: () => {}, alive: () => true });
-  const sessionId = store.getItem("AQ-1").job.sessionId;
   await execJob("AQ-1", { home, claudeBin });
+  const sessionId = store.getItem("AQ-1").job.sessionId;
   assert.equal(store.getItem("AQ-1").status, "review");
   assert.equal(store.getItem("AQ-1").job.pid, null);
 
@@ -122,10 +123,12 @@ test("exec: first run uses --session-id, a follow-up resumes the same session", 
   tick({ home, spawnSupervisor: () => {}, alive: () => true });
   await execJob("AQ-1", { home, claudeBin });
   const [first, second] = calls(home);
-  assert.equal(first.args[first.args.indexOf("--session-id") + 1], sessionId);
-  assert.equal(second.args[second.args.indexOf("--resume") + 1], sessionId);
-  assert.match(second.args[1], /make it shorter/);
-  assert.equal(second.args[second.args.indexOf("--permission-mode") + 1], "dontAsk");
+  assert.ok(first.args.includes("--bg") && !first.args.includes("--resume"));
+  assert.equal(first.args[first.args.indexOf("--name") + 1], "AQ-1 · Job 1");
+  assert.equal(first.args[first.args.indexOf("--permission-mode") + 1], "dontAsk");
+  assert.deepEqual(second.args.slice(0, 3), ["--bg", "--resume", sessionId], "same session, saved options");
+  assert.match(second.args.at(-1), /make it shorter/);
+  assert.equal(first.args.at(-2), "--", "the prompt can't be read as a flag value");
   assert.equal(fs.realpathSync(first.cwd), fs.realpathSync(store.getItem("AQ-1").job.workDir));
   assert.equal(store.getItem("AQ-1").job.followUp, null);
 });
@@ -135,7 +138,7 @@ test("exec: a run that ends without reporting goes to review with a notice", asy
   tick({ home, spawnSupervisor: () => {}, alive: () => true });
   await execJob("AQ-1", { home, claudeBin: fakeClaude(home, "fail") });
   assert.equal(store.getItem("AQ-1").status, "review");
-  assert.match(store.getItem("AQ-1").job.notice, /exit 3/);
+  assert.match(store.getItem("AQ-1").job.notice, /without posting a result/);
 });
 
 test("exec: stop kills the worker", async () => {
@@ -181,4 +184,23 @@ test("worker guard: job folder only, own thread only, no push or network", () =>
   assert.equal(call(send, { channel_id: "C9", thread_ts: "1.5", message: "hi" }), "deny");
   assert.equal(call("mcp__claude_ai_Slack__slack_send_message_draft", { channel_id: "C9" }), "allow");
   assert.equal(call("mcp__claude_ai_Gmail__send_message", {}), "deny");
+});
+
+test("sessionName: card id and title, short enough for the agent view", () => {
+  assert.equal(sessionName({ id: "AQ-7", title: "David:  tip to\nfilter" }), "AQ-7 · David: tip to filter");
+  const long = sessionName({ id: "AQ-8", title: "x".repeat(100) });
+  assert.equal(long.length, 60);
+  assert.ok(long.endsWith("…"));
+});
+
+test("trustJobsFolder: trusts jobs/ once, and not at all under a trusted parent", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aq-trust-"));
+  const file = path.join(dir, ".claude.json");
+  fs.writeFileSync(file, JSON.stringify({ keep: 1, projects: { "/elsewhere": { hasTrustDialogAccepted: true } } }));
+  assert.equal(trustJobsFolder("/data/aq", file), true);
+  assert.equal(trustJobsFolder("/data/aq", file), false);
+  const saved = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.equal(saved.keep, 1);
+  assert.equal(saved.projects["/data/aq/jobs"].hasTrustDialogAccepted, true);
+  assert.equal(trustJobsFolder("/elsewhere/aq", file), false, "a trusted parent covers it");
 });

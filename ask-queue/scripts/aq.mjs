@@ -35,7 +35,7 @@ export const TRANSITIONS = {
   skipped: ["asking", "approving", "scoping", "ready"],
 };
 // Session kinds: a card session drafts replies and scopes work; after "go" it does the work itself
-// (kind work), with the work budget and time limit.
+// (kind work), with the work model and time limit.
 export const JOB_KINDS = ["card", "work"];
 export const CARD_BRIEF = "Card session: prep this ask, post its card, then handle every reply in its thread (references/card-session.md).";
 // "stop" in a card thread while its session runs stops the run (the gate can't read meaning).
@@ -68,10 +68,8 @@ export const WORKER_DEFAULTS = {
   max: 5, // sessions running at once
   dailyRuns: 100, // session starts and resumes per day (every reply on a card is one)
   timeLimitMin: 60, // per work run; the session is stopped after this
-  maxBudgetUsd: 10, // per work run (claude --max-budget-usd)
   model: "opus", // work runs
   cardTimeLimitMin: 20, // per card run (prep, a reply, a draft)
-  cardBudgetUsd: 5, // per card run
   cardModel: "opus", // card runs
   cardEffort: "medium", // card runs (claude --effort); work runs use the default effort
 };
@@ -663,7 +661,8 @@ export function nowInfo(store, clock) {
   };
 }
 
-// Settings JSON for headless runs: wires the guard hook with absolute paths.
+// Settings JSON for headless runs: wires the guard hook with absolute paths, and points every command
+// at this data directory (background sessions don't inherit the caller's environment).
 // With workerId: the worker profile (guard.mjs --worker), which only polices outward actions.
 export function headlessSettings(home, workerId) {
   const guard = path.join(SKILL_DIR, "scripts", "guard.mjs");
@@ -671,6 +670,7 @@ export function headlessSettings(home, workerId) {
   if (workerId !== undefined && !/^AQ-\d+$/.test(String(workerId))) throw new AqError(`Invalid item id: ${workerId}`);
   const worker = workerId ? ` --worker ${workerId}` : "";
   return {
+    env: { ASK_QUEUE_HOME: home },
     hooks: {
       PreToolUse: [
         {

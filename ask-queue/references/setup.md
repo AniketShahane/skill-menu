@@ -61,13 +61,17 @@ clash with a replies check on the shared lock).
 
 Every card has its own Claude session. After every check (sweep or replies, run or skipped),
 `scripts/dispatch.mjs tick` (no model) starts queued sessions: new asks to prep, cards with new
-replies, work after "go". Each session runs `claude -p` in its own folder under
-`~/.local/share/ask-queue/jobs/AQ-n/work` and is resumed there for every round, with a fail-closed
+replies, work after "go". Each session is a background `claude --bg` session named
+`AQ-n · <title>`, so it shows in Claude Code's agent view (`claude agents`): under "working" while a
+round runs, then under "completed" (it's stopped between rounds so it doesn't hold memory). It runs
+in its own folder under `~/.local/share/ask-queue/jobs/AQ-n/work` and is resumed there for every
+round. Background sessions only start in trusted folders, so the first run marks `jobs/` as trusted
+in your claude config. Each session has a fail-closed
 guard: edits and commands only in that folder (plus memory notes), `aq.mjs` changes only to its own
 item, Slack posts only in its card thread (plus posting the card itself once), no network commands
 and no push. Limits live in `config.workers`: `max` 5 sessions at once, `dailyRuns` 100 runs a day;
-card runs `cardModel` opus, `cardEffort` medium, `cardBudgetUsd` 5, `cardTimeLimitMin` 20; work runs `model` opus,
-`maxBudgetUsd` 10, `timeLimitMin` 60. Change one with `$AQ config set workers.max 3`. A closed
+card runs `cardModel` opus, `cardEffort` medium, `cardTimeLimitMin` 20; work runs `model` opus,
+`timeLimitMin` 60. There's no per-run dollar cap: `claude --max-budget-usd` only works in `-p` mode. Change one with `$AQ config set workers.max 3`. A closed
 card keeps its session for 48 hours. Code work uses a git worktree at `jobs/AQ-n/work/repo` on a
 local branch `aq/AQ-n-…`; when you're done with it, push the branch yourself and remove the
 worktree with `git worktree remove`.

@@ -6,7 +6,7 @@ import { CARD_BRIEF, TRANSITIONS, routeToCard, updateItem } from "../scripts/aq.
 import { cardPostMarker, execJob, settingsFile, tick, workerPrompt } from "../scripts/dispatch.mjs";
 import { decide as gateDecide } from "../scripts/gate.mjs";
 import { decide as guardDecide, makeContext } from "../scripts/guard.mjs";
-import { SELF_DM, USER, addItem, makeHome, setStatus, withCard } from "./helpers.mjs";
+import { SELF_DM, USER, addItem, fakeBgClaude, makeHome, setStatus, withCard } from "./helpers.mjs";
 
 const noSpawn = () => {};
 
@@ -184,7 +184,7 @@ function fakeClaude(home) {
     `#!/usr/bin/env bash\nprintf '%s\\n' "$@" >> "${home}/claude-args.txt"\necho --- >> "${home}/claude-args.txt"\nnode "${aq}" update "$ASK_QUEUE_JOB" --status "\${FAKE_STATUS:-approving}" >/dev/null\n`,
   );
   fs.chmodSync(bin, 0o755);
-  return bin;
+  return fakeBgClaude(home, bin);
 }
 
 const runsOf = (home) =>
@@ -199,8 +199,8 @@ test("dispatch: every reply resumes the same session", async () => {
 
   routeToCard(store, id, { messages: [{ ts: "600.1", text: "ok" }] });
   tick({ home, spawnSupervisor: noSpawn });
-  const sessionId = store.getItem(id).job.sessionId;
   await execJob(id, { home, claudeBin });
+  const sessionId = store.getItem(id).job.sessionId;
   let item = store.getItem(id);
   assert.equal(item.status, "approving", "the run set the resting status");
   assert.equal(item.job.followUp, null);
@@ -211,11 +211,10 @@ test("dispatch: every reply resumes the same session", async () => {
   await execJob(id, { home, claudeBin });
 
   const [first, second] = runsOf(home);
-  assert.equal(first[first.indexOf("--session-id") + 1], sessionId);
   assert.ok(!first.includes("--resume"));
+  assert.equal(first[first.indexOf("--name") + 1], `${id} · ${item.title}`, "named after the card in the agent view");
   assert.equal(second[second.indexOf("--resume") + 1], sessionId);
   assert.ok(second.join("\n").includes("[601.1] yes"), "the new reply is in the resume prompt");
-  assert.equal(first[first.indexOf("--max-budget-usd") + 1], "5", "card runs use the card budget");
   assert.equal(first[first.indexOf("--model") + 1], "opus");
   assert.equal(first[first.indexOf("--effort") + 1], "medium");
   item = store.getItem(id);
@@ -230,10 +229,10 @@ test("dispatch: 'go' moves the same session to a work run with the work budget",
   withCard(store, id, "500.000100");
   routeToCard(store, id, { messages: [{ ts: "600.1", text: "go" }] });
   tick({ home, spawnSupervisor: noSpawn });
-  const sessionId = store.getItem(id).job.sessionId;
   // The card run writes the brief and queues the work (as card-session.md says).
   process.env.FAKE_STATUS = "working";
   await execJob(id, { home, claudeBin });
+  const sessionId = store.getItem(id).job.sessionId;
   updateItem(store, id, { patch: { job: { kind: "work", brief: "Objective: the query" } }, status: "ready" });
   tick({ home, spawnSupervisor: noSpawn });
   process.env.FAKE_STATUS = "review";
@@ -242,7 +241,7 @@ test("dispatch: 'go' moves the same session to a work run with the work budget",
   const runs = runsOf(home);
   const work = runs.at(-1);
   assert.equal(work[work.indexOf("--resume") + 1], sessionId);
-  assert.equal(work[work.indexOf("--max-budget-usd") + 1], "10");
+  assert.ok(work.includes("--model"), "a work run starts with the work options");
   assert.ok(work.join("\n").includes("The user said go"));
   assert.equal(store.getItem(id).status, "review");
 });
@@ -264,7 +263,7 @@ test("dispatch: a reply during a run re-queues the session when the run ends", a
     `#!/usr/bin/env bash\nnode "${aq}" route "$ASK_QUEUE_JOB" --file tmp/route.json >/dev/null\nnode "${aq}" update "$ASK_QUEUE_JOB" --status approving >/dev/null\n`,
   );
   fs.chmodSync(claudeBin, 0o755);
-  await execJob(id, { home, claudeBin });
+  await execJob(id, { home, claudeBin: fakeBgClaude(home, claudeBin) });
   const item = store.getItem(id);
   assert.equal(item.status, "ready");
   assert.match(item.job.followUp, /say Friday/);
@@ -280,7 +279,7 @@ test("dispatch: a prep run that posts no card is retried, then reported", async 
     fs.mkdirSync(path.dirname(cardPostMarker(home, id)), { recursive: true });
     fs.writeFileSync(cardPostMarker(home, id), "x");
     tick({ home, spawnSupervisor: noSpawn });
-    await execJob(id, { home, claudeBin });
+    await execJob(id, { home, claudeBin: fakeBgClaude(home, claudeBin) });
     assert.ok(!fs.existsSync(cardPostMarker(home, id)), "marker cleared for the retry");
   }
   const item = store.getItem(id);

@@ -6,15 +6,17 @@
 //   dispatch.mjs exec AQ-n   internal: supervise one worker run (tick spawns it detached)
 //   dispatch.mjs status      running and queued work (same as aq.mjs jobs)
 //
-// Every card has one Claude session for its whole life: the first run (--session-id) preps the ask
+// Every card has one Claude session for its whole life: the first run preps the ask
 // and posts the card; every reply in the card thread, and the work after "go", resumes it (--resume).
-// A session is `claude -p` with the fail-closed worker guard (guard.mjs --worker), always started in
+// A session is a background `claude --bg` named "AQ-n · <title>" (so it shows in Claude Code's agent
+// view), with the fail-closed worker guard (guard.mjs --worker), always started in
 // <home>/jobs/AQ-n/work (resume needs the same folder). Code work gets a git worktree on branch
 // aq/AQ-n-… at work/repo. Card runs (kind card) and work runs (kind work) have separate limits.
 
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -31,8 +33,7 @@ import {
   workerConfig,
 } from "./aq.mjs";
 
-const POLL_MS = Number(process.env.ASK_QUEUE_POLL_MS) || 5000;
-const KILL_GRACE_MS = 10_000;
+const pollMs = () => Number(process.env.ASK_QUEUE_POLL_MS) || 5000;
 // A worker that set `working` this recently may not have recorded its pid yet.
 const START_GRACE_MS = 60_000;
 
@@ -50,8 +51,8 @@ export const cardPostMarker = (home, id) => path.join(home, "jobs", ".cardposts"
 // Per-run limits and model for the session's current kind.
 export function runLimits(config, kind) {
   return kind === "work"
-    ? { model: config.model, effort: config.effort, budgetUsd: config.maxBudgetUsd, timeLimitMin: config.timeLimitMin }
-    : { model: config.cardModel, effort: config.cardEffort, budgetUsd: config.cardBudgetUsd, timeLimitMin: config.cardTimeLimitMin };
+    ? { model: config.model, effort: config.effort, timeLimitMin: config.timeLimitMin }
+    : { model: config.cardModel, effort: config.cardEffort, timeLimitMin: config.cardTimeLimitMin };
 }
 
 function patchJob(store, id, job, { status, note } = {}) {
@@ -299,7 +300,60 @@ function endStatus(item) {
   return back && RESTING.includes(back) && back !== "new" ? back : "review";
 }
 
-// Supervises one run: starts claude, enforces stop and the time limit, records how it ended.
+// The card's name in Claude Code's agent view: its id and what it's about.
+export function sessionName(item) {
+  const name = `${item.id} · ${String(item.title || "").replace(/\s+/g, " ").trim()}`;
+  return name.length > 60 ? `${name.slice(0, 59)}…` : name;
+}
+
+// The config file the claude CLI reads (and keeps folder trust in) when started from here.
+export function claudeConfigFile(env = process.env) {
+  if (env.ASK_QUEUE_CLAUDE_JSON) return env.ASK_QUEUE_CLAUDE_JSON;
+  return env.CLAUDE_CONFIG_DIR ? path.join(env.CLAUDE_CONFIG_DIR, ".claude.json") : path.join(os.homedir(), ".claude.json");
+}
+
+// Background sessions only start in trusted folders. Trusting jobs/ once covers every card's folder.
+export function trustJobsFolder(home, file = claudeConfigFile()) {
+  const dir = path.join(home, "jobs");
+  let config = {};
+  try {
+    config = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+  }
+  config.projects ||= {};
+  const covered = Object.entries(config.projects).some(
+    ([folder, settings]) => settings?.hasTrustDialogAccepted && (dir === folder || dir.startsWith(`${folder}${path.sep}`)),
+  );
+  if (covered) return false;
+  config.projects[dir] = { ...config.projects[dir], hasTrustDialogAccepted: true };
+  const tmp = `${file}.aq-${process.pid}`;
+  fs.writeFileSync(tmp, `${JSON.stringify(config, null, 2)}\n`);
+  fs.renameSync(tmp, file);
+  return true;
+}
+
+// This session's entry in `claude agents` (null if it isn't listed).
+function bgEntry(claudeBin, opts, bgId) {
+  try {
+    const list = JSON.parse(execFileSync(claudeBin, ["agents", "--json", "--all"], { ...opts, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+    return list.find((entry) => entry.id === bgId) || null;
+  } catch {
+    return undefined; // couldn't ask: try again next poll
+  }
+}
+
+function bgStop(claudeBin, opts, bgId) {
+  try {
+    execFileSync(claudeBin, ["stop", bgId], { ...opts, stdio: "ignore", timeout: 30_000 });
+  } catch {
+    // already stopped
+  }
+}
+
+// Supervises one run: starts a background claude session (listed in Claude Code's agent view under
+// the card's name), enforces stop and the time limit, then stops it so it doesn't sit in memory.
+// The stopped session stays listed under "completed" and is resumed by the card's next run.
 export async function execJob(id, { home = resolveHome(), claudeBin = process.env.ASK_QUEUE_CLAUDE_BIN || "claude" } = {}) {
   const store = createStore(home);
   const config = workerConfig(store);
@@ -312,49 +366,76 @@ export async function execJob(id, { home = resolveHome(), claudeBin = process.en
   const prompt = workerPrompt(home, item, store.config());
   if (kind === "work" && !item.job.workStarted) patchJob(store, id, { workStarted: new Date().toISOString() });
 
-  const args = [
-    "-p",
-    prompt,
-    "--model",
-    limits.model,
-    ...(limits.effort ? ["--effort", limits.effort] : []),
-    "--permission-mode",
-    "dontAsk",
-    "--settings",
-    settingsFile(home, id),
-    "--add-dir",
-    SKILL_DIR,
-    "--disallowedTools",
-    "WebFetch",
-    "WebSearch",
-    "--max-budget-usd",
-    String(limits.budgetUsd),
-    "--output-format",
-    "text",
-    ...(item.job.sessionStarted ? ["--resume", item.job.sessionId] : ["--session-id", item.job.sessionId]),
-  ];
-  const log = fs.openSync(path.join(item.job.dir, "log.txt"), "a");
-  fs.writeSync(log, `=== ${new Date().toISOString()} run ${item.job.runs} ${kind} ${item.job.sessionStarted ? "resume" : "start"} session ${item.job.sessionId}\n`);
-  const child = spawn(claudeBin, args, {
-    cwd: item.job.workDir,
-    detached: true,
-    stdio: ["ignore", log, log],
-    env: { ...process.env, ASK_QUEUE_HOME: home, ASK_QUEUE_JOB: id },
-  });
-  patchJob(store, id, { sessionStarted: true });
+  const opts = { cwd: item.job.workDir, env: { ...process.env, ASK_QUEUE_HOME: home, ASK_QUEUE_JOB: id } };
+  const resume = item.job.sessionStarted && item.job.sessionId;
+  // A background session keeps the options it was started with. Passing new ones (a card session
+  // turning into a work run) starts a copy with the full history under a new id.
+  const sameOptions = resume && item.job.bgKind === kind;
+  const args = sameOptions
+    ? ["--bg", "--resume", item.job.sessionId, "--", prompt]
+    : [
+        "--bg",
+        "--name",
+        sessionName(item),
+        "--model",
+        limits.model,
+        ...(limits.effort ? ["--effort", limits.effort] : []),
+        "--permission-mode",
+        "dontAsk",
+        "--settings",
+        settingsFile(home, id),
+        "--add-dir",
+        SKILL_DIR,
+        "--disallowedTools",
+        "WebFetch",
+        "WebSearch",
+        ...(resume ? ["--resume", item.job.sessionId] : []),
+        "--", // the list flags above would otherwise take the prompt as one more value
+        prompt,
+      ];
+  const logFile = path.join(item.job.dir, "log.txt");
+  const log = (line) => fs.appendFileSync(logFile, `=== ${new Date().toISOString()} ${line}\n`);
+  log(`run ${item.job.runs} ${kind} ${resume ? `resume session ${item.job.sessionId}` : "new session"}`);
+
+  if (item.job.bgId) bgStop(claudeBin, opts, item.job.bgId); // a session still running would be copied, not resumed
+  let bgId = null;
+  let code = 0;
+  try {
+    trustJobsFolder(home);
+    const out = execFileSync(claudeBin, args, { ...opts, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120_000 });
+    bgId = out.replace(/\x1b\[[0-9;]*m/g, "").match(/backgrounded · ([0-9a-f]+)/)?.[1] || null;
+    if (!bgId) log(`no session id in: ${out.trim().slice(0, 300)}`);
+  } catch (err) {
+    log(`start failed: ${String(err.stderr || err.message).trim().slice(0, 300)}`);
+    code = err.status || 1;
+  }
+  if (!bgId) return finishRun(store, id, { code: code || 1, reason: null, limits, home });
+  patchJob(store, id, { sessionStarted: true, bgId, bgKind: kind });
 
   let reason = null;
-  const killGroup = (signal) => {
-    try {
-      process.kill(-child.pid, signal);
-    } catch {
-      // already gone
-    }
-  };
+  let missing = 0;
   const limitMs = limits.timeLimitMin * 60 * 1000;
   const started = Date.now();
-  const timer = setInterval(() => {
-    if (reason) return;
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, pollMs()));
+    const entry = bgEntry(claudeBin, opts, bgId);
+    if (entry?.sessionId && entry.sessionId !== store.getItem(id).job.sessionId) patchJob(store, id, { sessionId: entry.sessionId });
+    if (entry === null && (missing += 1) >= 3) {
+      code = 1;
+      log("session no longer listed");
+      break;
+    }
+    if (entry) missing = 0;
+    // A finished turn leaves the session idle with a live pid. No pid is left over from the stopped
+    // earlier turn (just before the resume wakes it), or a session that died.
+    // The turn is over once a live session isn't "working": "done", or "blocked" when its last
+    // message reads like a question (the agent view's "awaiting input").
+    if (entry?.pid && ["done", "blocked"].includes(entry.state)) break;
+    if (entry && !entry.pid && Date.now() - started > START_GRACE_MS) {
+      if (entry.state !== "done") code = 1;
+      log(`session exited (${entry.state || "no state"})`);
+      break;
+    }
     let stop = false;
     try {
       stop = Boolean(store.getItem(id).job?.stopRequested);
@@ -363,20 +444,10 @@ export async function execJob(id, { home = resolveHome(), claudeBin = process.en
     }
     if (stop) reason = "stopped";
     else if (Date.now() - started > limitMs) reason = "timeout";
-    if (reason) {
-      killGroup("SIGTERM");
-      setTimeout(() => killGroup("SIGKILL"), KILL_GRACE_MS).unref();
-    }
-  }, POLL_MS);
-
-  const code = await new Promise((resolve) => {
-    child.on("error", () => resolve(127));
-    child.on("exit", (exitCode, signal) => resolve(exitCode ?? (signal ? 128 : 1)));
-  });
-  clearInterval(timer);
-  fs.writeSync(log, `=== ${new Date().toISOString()} exit ${code}${reason ? ` (${reason})` : ""}\n`);
-  fs.closeSync(log);
-
+    if (reason) break;
+  }
+  bgStop(claudeBin, opts, bgId);
+  log(`end ${reason || (code ? `failed (${code})` : "done")}`);
   return finishRun(store, id, { code, reason, limits, home });
 }
 
