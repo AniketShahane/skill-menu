@@ -124,7 +124,7 @@ test("exec: first run uses --session-id, a follow-up resumes the same session", 
   await execJob("AQ-1", { home, claudeBin });
   const [first, second] = calls(home);
   assert.ok(first.args.includes("--bg") && !first.args.includes("--resume"));
-  assert.equal(first.args[first.args.indexOf("--name") + 1], "AQ-1 · Job 1");
+  assert.equal(first.args[first.args.indexOf("--name") + 1], "AQ-1 Job 1");
   assert.equal(first.args[first.args.indexOf("--permission-mode") + 1], "dontAsk");
   assert.deepEqual(second.args.slice(0, 3), ["--bg", "--resume", sessionId], "same session, saved options");
   assert.match(second.args.at(-1), /make it shorter/);
@@ -189,11 +189,12 @@ test("worker guard: job folder only, own thread only, no push or network", () =>
   assert.equal(call(react, { channel_id: "C9", message_ts: "9.1", emoji: "eyes" }), "deny");
 });
 
-test("sessionName: card id and title, short enough for the agent view", () => {
-  assert.equal(sessionName({ id: "AQ-7", title: "David:  tip to\nfilter" }), "AQ-7 · David: tip to filter");
-  const long = sessionName({ id: "AQ-8", title: "x".repeat(100) });
-  assert.equal(long.length, 60);
-  assert.ok(long.endsWith("…"));
+test("sessionName: card id and the first whole words of the title, at most 30 chars", () => {
+  assert.equal(sessionName({ id: "AQ-7", title: "David:  tip to\nfilter" }), "AQ-7 David: tip to filter");
+  assert.equal(sessionName({ id: "AQ-12", title: "Sam: present your payments findings?" }), "AQ-12 Sam: present");
+  assert.equal(sessionName({ id: "AQ-9", title: "Lee: " + "x".repeat(40) }), "AQ-9 Lee");
+  assert.equal(sessionName({ id: "AQ-8", title: "x".repeat(100) }), "AQ-8");
+  assert.ok(sessionName({ id: "AQ-8", title: "word ".repeat(40) }).length <= 30);
 });
 
 test("trustJobsFolder: trusts jobs/ once, and not at all under a trusted parent", () => {

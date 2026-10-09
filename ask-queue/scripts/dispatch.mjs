@@ -307,10 +307,19 @@ function endStatus(item) {
 }
 
 // The card's name in Claude Code's agent view: its id and what it's about.
-export function sessionName(item) {
-  const name = `${item.id} · ${String(item.title || "").replace(/\s+/g, " ").trim()}`;
-  return name.length > 60 ? `${name.slice(0, 59)}…` : name;
+// Short enough to read at a glance in the agent view: the card id, then whole words of the title.
+export function sessionName(item, max = 30) {
+  let name = item.id;
+  for (const word of String(item.title || "").split(/\s+/).filter(Boolean)) {
+    if (name.length + 1 + word.length > max) break;
+    name += ` ${word}`;
+  }
+  // Don't end on a word that only makes sense with what was cut ("Ruchita: apply the").
+  const words = name.split(" ");
+  while (words.length > 2 && TAIL_FILLER.test(words.at(-1))) words.pop();
+  return words.join(" ").replace(/[\s:;,.(–-]+$/, "");
 }
+const TAIL_FILLER = /^(a|an|the|to|of|for|and|or|as|at|in|on|by|with|from|your|my|our|is|are|be|use|can|we)$/i;
 
 // The config files claude may keep folder trust in. Which one a process reads depends on its
 // CLAUDE_CONFIG_DIR, and the background daemon that hosts the sessions (and the agent view) can be

@@ -62,7 +62,7 @@ clash with a replies check on the shared lock).
 Every card has its own Claude session. After every check (sweep or replies, run or skipped),
 `scripts/dispatch.mjs tick` (no model) starts queued sessions: new asks to prep, cards with new
 replies, work after "go". Each session is a background `claude --bg` session named
-`AQ-n · <title>`, so it shows in Claude Code's agent view (`claude agents`): under "working" while a
+`AQ-n <first words of the title>` (30 characters at most), so it shows in Claude Code's agent view (`claude agents`): under "working" while a
 round runs, then under "completed" (it's stopped between rounds so it doesn't hold memory). It runs
 in its own folder under `~/.local/share/ask-queue/jobs/AQ-n/work` and is resumed there for every
 round. Background sessions only start (and only run the guard hook) in trusted folders, so the
