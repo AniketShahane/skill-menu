@@ -151,10 +151,12 @@ export function prepareWorkspace(home, item) {
   return job;
 }
 
-// New asks get their card session: queued to prep the ask and post its card.
-function queuePreps(store, now) {
+// New asks get their card session: queued to prep the ask and post its card, once they are
+// workers.prepDelayMin old (the user often picks an ask up themselves first; the session checks).
+function queuePreps(store, now, delayMin = 0) {
   const queued = [];
   for (const item of store.allItems().filter((i) => i.status === "new")) {
+    if (now - Date.parse(item.createdAt || 0) < delayMin * 60_000) continue;
     const patch = {
       job: { kind: "card", brief: item.job?.brief || CARD_BRIEF, restingStatus: "new" },
     };
@@ -201,7 +203,7 @@ export function tick({ home = resolveHome(), clock, spawnSupervisor = defaultSpa
       result.reaped.push(item.id);
     }
     result.expired = expireSessions(store, now);
-    result.prepQueued = queuePreps(store, now);
+    result.prepQueued = queuePreps(store, now, Number(config.prepDelayMin) || 0);
 
     let running = store.allItems().filter((i) => i.status === "working").length;
     let { runs } = readCounter(home, now);
@@ -265,9 +267,11 @@ This run uses ${model}: say so on the card (cards.md). If the user's new message
   const repo = roots.length
     ? `\nRepo files under ${roots.join(", ")}: read and search freely. Edit one only once the user allowed it (allowed now: ${allowed}); to ask, follow references/card-session.md "Editing repo files".`
     : "";
+  const perms = Array.isArray(job.perms) && job.perms.length ? `\nThe user OK'd for this card: ${job.perms.join(", ")}.` : "";
   const where = `Job folder (the only place you may run commands; write --file inputs here): ${job.workDir}${
     job.repoDir ? `\nCode: the git worktree at ${job.repoDir}, branch ${job.branch}` : ""
   }${repo}
+${perms}
 ${post}
 State CLI: node ${aq}   (your item: get ${item.id}; you may update only ${item.id})
 Skill: ${SKILL_DIR}`;
@@ -421,6 +425,8 @@ export async function execJob(id, { home = resolveHome(), claudeBin = process.en
         settingsFile(home, id),
         "--add-dir",
         SKILL_DIR,
+        // The repos' skills load from here; the guard still decides what each call may touch.
+        ...repoRoots(store.config()).flatMap((root) => ["--add-dir", root]),
         "--disallowedTools",
         "WebFetch",
         "WebSearch",

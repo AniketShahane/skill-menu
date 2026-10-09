@@ -125,16 +125,61 @@ export function repoGrantPatch(job, texts, config) {
   return { repoWrites: [...allowed], repoProposed: [], granted: [...allowed].slice(before) };
 }
 
+// ---------- permissions ----------
+// Anything else the guard won't let a card session do on its own (a skill, the databricks CLI, a
+// write tool, a read outside its folders) needs the user's OK. The guard records the missing kinds
+// (job.permProposed, with permProposedAt) and tells the session to ask in its card thread; the user's
+// next reply allows them if it is a yes (or a ✅ reaction on the ask, gate.mjs), for this card only
+// (job.perms). Any other reply drops the proposal. Like repo edits, only code grants.
+export const PERM_KIND = /^(skill|tool|mcp|cmd|read|write):[A-Za-z0-9_.@ -]{1,80}$/;
+
+export function permGrantPatch(job, texts) {
+  const proposed = Array.isArray(job?.permProposed) ? job.permProposed : [];
+  if (!proposed.length || !texts.length) return null;
+  const perms = new Set(Array.isArray(job?.perms) ? job.perms : []);
+  const before = perms.size;
+  if (texts.some((text) => APPROVE_WORDS.test(text))) for (const kind of proposed) perms.add(kind);
+  return { perms: [...perms], permProposed: [], permProposedAt: null, granted: [...perms].slice(before) };
+}
+
+// Called by the guard: adds kinds to the card's open proposal. Returns the full proposal.
+export function proposePerms(store, id, kinds, clock) {
+  const bad = kinds.find((kind) => !PERM_KIND.test(kind));
+  if (bad) throw new AqError(`not a permission kind: ${bad}`);
+  return withItemLock(store, id, () => {
+    const item = store.getItem(id);
+    const open = Array.isArray(item.job?.permProposed) ? item.job.permProposed : [];
+    const added = kinds.filter((kind) => !open.includes(kind));
+    if (!added.length) return open;
+    const job = { permProposed: [...open, ...added], permProposedAt: item.job?.permProposedAt || nowIso(clock) };
+    applyUpdate(store, id, { patch: { job }, note: `asks the user's OK: ${added.join(", ")}`, internal: true }, clock);
+    return job.permProposed;
+  });
+}
+
+// The user's text applied to both kinds of grant. Returns the job fields to set (or null) and the grants.
+function grantPatch(job, texts, config) {
+  const repo = repoGrantPatch(job, texts, config);
+  const perm = permGrantPatch({ ...job, ...(repo || {}) }, texts);
+  if (!repo && !perm) return null;
+  const { granted: files = [], ...repoFields } = repo || {};
+  const { granted: kinds = [], ...permFields } = perm || {};
+  const notes = [];
+  if (files.length) notes.push(`repo edits allowed: ${files.join(", ")}`);
+  if (kinds.length) notes.push(`allowed: ${kinds.join(", ")}`);
+  if (perm && !kinds.length) notes.push("permission request declined");
+  return { fields: { ...repoFields, ...permFields }, granted: [...files, ...kinds], note: notes.join("; ") };
+}
+
 // Used by the prompt hook: applies the user's typed text to the card's grants.
 export function grantRepoEdits(store, id, texts, clock) {
   return withItemLock(store, id, () => {
     const item = store.getItem(id);
-    const grant = repoGrantPatch(item.job, texts, store.config());
+    const grant = grantPatch(item.job, texts, store.config());
     if (!grant) return [];
-    const { granted, ...job } = grant;
-    const note = granted.length ? `repo edits allowed by the user: ${granted.join(", ")}` : "repo edit proposal dropped";
-    applyUpdate(store, id, { patch: { job }, note, internal: true }, clock);
-    return granted;
+    const note = grant.note || "repo edit proposal dropped";
+    applyUpdate(store, id, { patch: { job: grant.fields }, note: `by the user: ${note}`, internal: true }, clock);
+    return grant.granted;
   });
 }
 // Statuses whose card threads are checked for replies every run.
@@ -171,6 +216,7 @@ export const WORKER_DEFAULTS = {
   cardTimeLimitMin: 20, // per card run (prep, a reply, a draft)
   cardModel: "sonnet", // card runs
   cardEffort: "medium", // card runs (claude --effort); work runs use the default effort
+  prepDelayMin: 10, // a new ask waits this long before its card session starts, so the user can claim it
 };
 
 const DEFAULT_STATE = {
@@ -440,7 +486,7 @@ function applyUpdate(store, id, { patch = {}, status, note, internal = false } =
       const files = list.map((file) => repoFile(file, roots));
       const bad = list.find((file, i) => !files[i]);
       if (bad !== undefined) throw new AqError(`${bad} is not a repo file you can propose (config repoEdit.roots, no secrets)`);
-      patch = { ...patch, job: { ...patch.job, repoProposed: files } };
+      patch = { ...patch, job: { ...patch.job, repoProposed: files, repoProposedAt: at } };
     }
     // Merge, so setting job.followUp never wipes the session id.
     patch = { ...patch, job: { ...(item.job || {}), ...patch.job } };
@@ -606,11 +652,10 @@ export function routeToCard(store, id, { messages, seenTs = null } = {}, clock, 
     const model = messages.map((m) => modelIn(m.text)).filter(Boolean).at(-1);
     if (model) patch.job.model = model;
     let note = "user message for the card session";
-    const repo = grant ? repoGrantPatch(job, messages.map((m) => m.text), store.config()) : null;
-    if (repo) {
-      const { granted, ...fields } = repo;
-      Object.assign(patch.job, fields);
-      if (granted.length) note += `; repo edits allowed: ${granted.join(", ")}`;
+    const given = grant ? grantPatch(job, messages.map((m) => m.text), store.config()) : null;
+    if (given) {
+      Object.assign(patch.job, given.fields);
+      if (given.note) note += `; ${given.note}`;
     }
     let status;
     if (fresh.status === "working") {

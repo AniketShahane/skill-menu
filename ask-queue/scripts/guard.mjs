@@ -4,19 +4,25 @@
 // Wired by `aq.mjs settings` as: node guard.mjs <ASK_QUEUE_HOME>   (hook JSON arrives on stdin)
 //
 // Worker profile (`node guard.mjs <home> --worker AQ-n`, for dispatch.mjs card sessions). Still
-// fail-closed: edits and commands only inside the session's job folder (<home>/jobs/AQ-n), plus
+// fail-closed: edits and commands inside the session's job folder (<home>/jobs/AQ-n), plus
 // memory/*.md; aq.mjs may change only its own item; Slack posts only in its own card thread, except
-// one top-level post of the card itself while the item has no card; the same draft-only MCP rules,
-// no push, no network commands. Repo files (config.repoEdit.roots): read and searched freely except
-// secrets; edited only when the user allowed that exact file (job.repoWrites, see aq.mjs).
+// one top-level post of the card itself while the item has no card; nothing is ever sent (drafts
+// only). Repo files (config.repoEdit.roots): read and searched freely except secrets; edited only
+// when the user allowed that exact file (job.repoWrites, see aq.mjs).
+// Anything else that isn't a hard rule (a skill, a subagent, a write tool, a network or push command,
+// a read or edit elsewhere) needs the user's OK, once per kind per card: the call is denied, the kind
+// is recorded (job.permProposed) and the session asks in its card thread. A yes allows it (job.perms).
+// Never allowed, OK or not: secrets and tokens, the guard's own settings, ask-queue state outside
+// aq.mjs, sudo and crontab.
 //
 // The same command is the worker's UserPromptSubmit hook: a prompt the user types into the session
 // (anything that isn't dispatch.mjs's prompt) may allow repo edits, like a card-thread reply.
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SECRET_FILE, createStore, grantRepoEdits, realTarget, repoRoots } from "./aq.mjs";
+import { SECRET_FILE, createStore, grantRepoEdits, proposePerms, realTarget, repoRoots } from "./aq.mjs";
 
 const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -120,6 +126,8 @@ export function makeContext(home, workerId) {
     card: item.card || null,
     repoRoots: repoRoots(config),
     repoWrites: Array.isArray(item.job?.repoWrites) ? item.job.repoWrites : [],
+    perms: Array.isArray(item.job?.perms) ? item.job.perms : [],
+    proposePerms: (kinds) => proposePerms(createStore(resolved), workerId, kinds),
     cardPosted: () => Boolean(marker) && fs.existsSync(marker),
     markCardPosted: () => {
       fs.mkdirSync(path.dirname(marker), { recursive: true });
@@ -133,8 +141,16 @@ const BOT_LEAD = /^(🤖|:robot_face:)/u;
 const allow = (reason) => ({ decision: "allow", reason });
 const deny = (reason) => ({ decision: "deny", reason });
 
+// Text filters an aq.mjs read may be piped into (no paths, no redirects): `aq list | jq ...`.
+const PIPE_FILTER = /^(jq|head|tail|grep|wc|sort|uniq|cut|tr)(\s+[^/]*)?$/;
+
 function decideBash(command, ctx) {
   const cmd = String(command || "").trim();
+  const [first, ...filters] = cmd.split("|").map((part) => part.trim());
+  if (filters.length && !/[;&`$<>\\\n\r]/.test(cmd) && filters.every((f) => PIPE_FILTER.test(f))) {
+    const verdict = decideBash(first, ctx);
+    return verdict.decision === "allow" ? allow("aq.mjs piped into a text filter") : verdict;
+  }
   if (/[;&|`$<>\\\n\r]/.test(cmd)) return deny("shell operators are not allowed; run aq.mjs alone");
   const match = cmd.match(/^node\s+(?:"([^"]+)"|'([^']+)'|(\S+))(?:\s|$)/);
   if (!match) return deny("only `node <skill>/scripts/aq.mjs ...` may run");
@@ -201,15 +217,26 @@ function decideMcp(name, input, ctx) {
     return allow("new private Google Doc draft");
   }
 
+  // Sending stays the user's job, OK or not.
+  if (SEND_TOOLS.test(tool)) return deny("sending is blocked: ask-queue only drafts");
   const words = toolWords(tool);
   const writeWord = words.find((word) => WRITE_WORDS.has(word));
-  if (writeWord) return deny(`write tool (${writeWord}) is blocked: ask-queue only drafts`);
+  if (writeWord) return { ...deny(`write tool (${writeWord}) is blocked: ask-queue only drafts`), askable: true };
   if (words.some((word) => READ_WORDS.has(word))) return allow("read-only tool");
-  return deny("tool is not recognized as read-only");
+  return { ...deny("tool is not recognized as read-only"), askable: true };
 }
+const SEND_TOOLS = /^(send_message|send_email|reply|reply_all|forward|slack_send_message|slack_schedule_message)$/;
 
-// Commands that reach other machines or publish work. Workers never push: the user does.
-const WORKER_BLOCKED = /(^|[\s;&|(`])(curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|ftp|sudo|su|gh|glab|npx|pip|pip3|npm|yarn|pnpm|docker|crontab|nohup|disown|setsid)(\s|$)|\bgit\b[^\n]*\b(push|remote|config|credential|clone|fetch|pull|submodule)\b/;
+// Programs that reach other machines, install, publish or detach: each needs the user's OK.
+const ASK_PROGRAMS = "curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|ftp|gh|glab|npx|pip|pip3|npm|yarn|pnpm|uvx|docker|nohup|disown|setsid";
+const ASK_PROGRAM = new RegExp(`(^|[\\s;&|(\`])(${ASK_PROGRAMS})(?=\\s|$|[;&|)])`, "g");
+// Never, with or without an OK.
+const NEVER_PROGRAM = /(^|[\s;&|(`])(sudo|su|crontab)(?=\s|$|[;&|)])/;
+const GIT_ASK = /\bgit\b[^\n;&|]*?\b(push|remote|config|credential|clone|fetch|pull|submodule)\b/g;
+// databricks CLI reads are free; anything that looks like it changes the workspace asks first.
+const DBX_WRITE = /\b(insert|update|delete|drop|create|merge|alter|truncate|grant|revoke|replace|run-now|submit|deploy|destroy|reset|set-permissions|import|upload|cp|mv|rm|mkdir|restart|start|stop|cancel)\b/i;
+// Secrets, tokens and the settings that wire this guard: closed to every command and every OK.
+const PROTECTED = /(slack-token|\.slack\/|\.config\/ask-queue|\.claude\.json|\.claude\/settings|settings(\.local)?\.json|\.ssh\/|\.aws\/|\.netrc|\.git-credentials|\.databrickscfg|credentials|\.databricks-|(^|[\s/'"=])\.env\b)/i;
 
 // aq.mjs commands a session may run: reads, plus changes to its own item and the ledger.
 const WORKER_AQ_READS = new Set(["get", "list", "now", "stats", "jobs"]);
@@ -227,30 +254,71 @@ function decideWorkerAq(cmd, ctx) {
   return deny(`a card session may only read state and update ${ctx.workerId}`);
 }
 
+// Folders no OK opens: ask-queue state (items, config, other jobs, the guard's settings), changed only
+// through aq.mjs, and the skill itself. The job folder and memory/ are fine.
+function controlled(target, ctx) {
+  if (isInside(target, ctx.jobDir) || isInside(target, path.join(ctx.home, "memory"))) return false;
+  return isInside(target, ctx.home) || isInside(target, ctx.skillDir);
+}
+
+// Denies and records the kinds the user hasn't OK'd yet; allows once they all are.
+function needOk(kinds, why, ctx) {
+  const unique = [...new Set(kinds)];
+  const missing = unique.filter((kind) => !ctx.perms?.includes(kind));
+  if (!missing.length) return allow(`the user OK'd ${unique.join(", ")}`);
+  try {
+    ctx.proposePerms?.(missing);
+  } catch {
+    // not recorded: the session's ask still reaches the user, who can OK it by typing into the session
+  }
+  return deny(
+    `${why}. This needs the user's OK (${missing.join(", ")}), now recorded. Ask in your card thread ` +
+      `(card-session.md "Asking for an OK"), then end this run with the card's resting status: their yes resumes you.`,
+  );
+}
+
 function decideWorkerBash(command, cwd, ctx, background) {
   const cmd = String(command || "").trim();
   if (!cmd) return deny("empty command");
-  if (background) return deny("background commands are blocked for workers");
   if (/\baq\.mjs\b/.test(cmd)) {
     const verdict = decideWorkerAq(cmd, ctx);
     if (verdict.decision === "deny") return verdict;
   }
-  if (!isInside(path.resolve(cwd), ctx.jobDir)) return deny("commands run only inside the job folder");
-  if (WORKER_BLOCKED.test(cmd)) return deny("network, install, push and background commands are blocked for workers");
-  if (/\$\{?(HOME|USER|XDG_[A-Z_]+|ASK_QUEUE_[A-Z_]+|PWD|OLDPWD)\b|(^|[\s=:'"(])~|(^|\s)cd\s*($|[;&|])|\bcd\s+-/.test(cmd)) {
-    return deny("home, environment paths and bare cd are blocked; stay in the job folder");
-  }
-  // Every path-looking word must stay inside the job folder (the skill's aq.mjs is also fine).
+  if (NEVER_PROGRAM.test(cmd)) return deny("sudo, su and crontab are never allowed");
+  if (PROTECTED.test(cmd)) return deny("secrets, tokens and the guard's settings stay closed");
+  const here = path.resolve(cwd);
+  if (controlled(here, ctx)) return deny("commands never run in ask-queue's own folders; use aq.mjs");
+
+  const kinds = [];
+  const program = (segment) => {
+    const words = segment.trim().split(/\s+/).filter((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w));
+    return path.basename((words[0] || "sh").replace(/^[('"]+/, "")) || "sh";
+  };
+  if (background) kinds.push("cmd:background");
+  for (const m of cmd.matchAll(ASK_PROGRAM)) kinds.push(`cmd:${m[2]}`);
+  for (const m of cmd.matchAll(GIT_ASK)) kinds.push(`cmd:git ${m[1]}`);
+
   const aq = path.join(ctx.skillDir, "scripts", "aq.mjs");
-  for (const word of cmd.split(/[\s;&|()<>`"'=]+/).filter(Boolean)) {
-    if (word.split("/").includes("..")) return deny("`..` paths are blocked; stay in the job folder");
-    if (word.startsWith("/")) {
-      const target = path.resolve(word);
-      if (target === aq || isInside(target, ctx.jobDir) || target === "/dev/null") continue;
-      return deny(`${word} is outside the job folder`);
+  const outside = !isInside(here, ctx.jobDir);
+  for (const segment of cmd.replace(/\d*>&\d+/g, " ").split(/\|\||&&|[|;&\n]/)) {
+    if (!segment.trim()) continue;
+    const prog = program(segment);
+    if (prog === "databricks" && DBX_WRITE.test(segment)) kinds.push("cmd:databricks-write");
+    let away = outside;
+    if (/\$\{?(HOME|USER|XDG_[A-Z_]+|ASK_QUEUE_[A-Z_]+|PWD|OLDPWD)\b|(^|[\s=:'"(])~|(^|\s)cd\s*$|\bcd\s+-/.test(segment)) away = true;
+    for (const word of segment.split(/[\s;&|()<>`"'=]+/).filter(Boolean)) {
+      const raw = word.replace(/^~(?=\/|$)/, os.homedir());
+      const pathy = raw.startsWith("/") || raw.split("/").includes("..");
+      if (!pathy || (prog === "databricks" && word.startsWith("/api/"))) continue;
+      const target = path.resolve(here, raw);
+      if (target === aq || target === "/dev/null") continue;
+      if (controlled(target, ctx)) return deny(`${word} is ask-queue's own state or the skill; use aq.mjs`);
+      if (!isInside(target, ctx.jobDir) && !isInside(target, path.join(ctx.home, "memory"))) away = true;
     }
+    if (away) kinds.push(`cmd:${prog}`);
   }
-  return allow("command inside the job folder");
+  if (!kinds.length) return allow("command inside the job folder");
+  return needOk(kinds, "this command reaches past the job folder", ctx);
 }
 
 function decideWorker(name, toolInput, input, ctx) {
@@ -261,11 +329,12 @@ function decideWorker(name, toolInput, input, ctx) {
     const target = path.resolve(cwd, typeof raw === "string" && raw ? raw : ".");
     const memory = path.join(ctx.home, "memory");
     if ([ctx.jobDir, memory, ctx.skillDir].some((dir) => isInside(target, dir))) return allow("read inside the job");
-    if (ctx.repoRoots.some((root) => isInside(realTarget(target), realTarget(root)))) {
-      if (SECRET_FILE.test(target) || SECRET_FILE.test(realTarget(target))) return deny("secret files stay closed");
-      return allow("read inside a repo root");
+    if (SECRET_FILE.test(target) || SECRET_FILE.test(realTarget(target)) || PROTECTED.test(realTarget(target))) {
+      return deny("secret files stay closed");
     }
-    return deny("workers read only their job folder, memory/, the skill and config repoEdit.roots");
+    if (ctx.repoRoots.some((root) => isInside(realTarget(target), realTarget(root)))) return allow("read inside a repo root");
+    if (controlled(realTarget(target), ctx)) return deny("ask-queue state is read through aq.mjs");
+    return needOk(["read:anywhere"], "workers read their job folder, memory/, the skill and the repo roots on their own", ctx);
   }
   if (name in WRITE_TOOLS) {
     const raw = toolInput[WRITE_TOOLS[name]];
@@ -276,14 +345,27 @@ function decideWorker(name, toolInput, input, ctx) {
     if (path.dirname(target) === path.join(ctx.home, "memory") && target.endsWith(".md")) return allow("memory note");
     // A repo file the user allowed by name or by a yes (aq.mjs repoGrantPatch).
     if (ctx.repoWrites.includes(realTarget(target)) && !SECRET_FILE.test(realTarget(target))) return allow("repo file the user allowed");
-    return deny(
-      "workers edit only inside their job folder, memory/*.md and repo files the user allowed: propose the file " +
-        "(job.repoProposed) and ask the user to reply yes (references/card-session.md)",
-    );
+    const real = realTarget(target);
+    const repo = ctx.repoRoots.some((root) => isInside(real, realTarget(root)));
+    if (repo || SECRET_FILE.test(real) || PROTECTED.test(real) || controlled(real, ctx)) {
+      return deny(
+        "workers edit only inside their job folder, memory/*.md and repo files the user allowed: propose the file " +
+          "(job.repoProposed) and ask the user to reply yes (references/card-session.md)",
+      );
+    }
+    return needOk(["write:anywhere"], "this edit is outside the job folder and the repos", ctx);
   }
   if (name === "Bash") return decideWorkerBash(toolInput.command, cwd, ctx, Boolean(toolInput.run_in_background));
-  if (name.startsWith("mcp__")) return decideMcp(name, toolInput, ctx);
-  return deny(`${name} is not available to workers`);
+  if (name.startsWith("mcp__")) {
+    const verdict = decideMcp(name, toolInput, ctx);
+    if (verdict.decision === "deny" && verdict.askable) {
+      return needOk([`mcp:${splitMcpName(name)?.tool || name}`.slice(0, 84)], verdict.reason, ctx);
+    }
+    return verdict;
+  }
+  if (name === "Skill") return needOk([`skill:${String(toolInput.skill || "unknown").slice(0, 80)}`], "skills need the user's OK", ctx);
+  if (["WebFetch", "WebSearch"].includes(name)) return deny(`${name} is off for card sessions`);
+  return needOk([`tool:${name}`.slice(0, 85)], `${name} isn't one of the session's own tools`, ctx);
 }
 
 export function decide(input, ctx) {

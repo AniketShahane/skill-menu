@@ -82,10 +82,11 @@ arrives when the run ends.
 Nobody answers in your chat. The user talks to you only through the card thread, and their words
 arrive in your prompt on resume.
 
-1. **Stay inside the job folder** you were given (your working directory). The guard blocks edits
-   and commands outside it, network commands, installs, `git push`, and `gh`/`glab`. A denied call is
-   final: don't look for another route; work around it or report it. Repo files the user allowed
-   (listed in your prompt) are the one exception: card-session.md "Editing repo files".
+1. **Stay inside the job folder** you were given (your working directory). Edits and commands
+   outside it, network commands, installs, `git push`, `gh`/`glab`, databricks writes, skills and
+   subagents need the user's OK first: card-session.md "Asking for an OK". Repo files go through
+   card-session.md "Editing repo files". Any other denial is final: don't look for another route;
+   work around it or report it.
 2. **Code work:** the repo is a git worktree at `repo/` in your job folder, on a new local branch.
    Commit as you go with plain messages. Never push; the user pushes.
 3. **Docs:** Drive `create_file` (no parent folder) for a private Google Doc titled `[Draft] …`.

@@ -57,7 +57,8 @@ schedule (replies 15m, sweep 2h), and the replies run passes card-thread replies
    user's.
 6. **Denied tool calls are final.** Headless runs go through `scripts/guard.mjs`, which blocks
    anything that is not a read or a draft. If a call is denied, don't try another route; note it.
-   Interactive sessions have no guard, so rule 1 is yours to keep.
+   A card session's denial that says it needs the user's OK is the one exception: ask for it
+   (card-session.md "Asking for an OK"). Interactive sessions have no guard, so rule 1 is yours to keep.
 
 ## Modes
 

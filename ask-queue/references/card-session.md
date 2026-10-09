@@ -27,6 +27,13 @@ passes their new messages to you in the prompt (oldest first, `[ts] text`). An e
 
 ## 1. First run: prep the ask and post its card
 
+0. **Is the user already on it?** The session starts `workers.prepDelayMin` (10) minutes after the
+   ask arrived, because the user often picks it up first. Read the source thread
+   (`slack_read_thread`) and the ask's reactions (`slack_get_reactions`, or a detailed
+   `slack_read_channel` read). If the user replied after the ask, or reacted to it with 👀, ✋ or ✅,
+   they have it: post nothing, `$AQ update AQ-n --status skipped --note "the user picked it up"` and
+   end the run. No ledger entry. Jira and Gmail asks: the same check on the user's own later comment
+   or reply.
 1. **Gather.** `$AQ get AQ-n`. Read the full thread or issue (`slack_read_thread`), docs linked in
    the ask (Drive `read_file_content`, Notion fetch), `$AQ ledger find "<who>"` and
    `$AQ ledger find "<topic words>"`, and the memory files.
@@ -72,6 +79,15 @@ is allowed at once. When they describe a file loosely ("the project reference do
 the proposal if it is a yes; any other reply drops it, so ask again if it still applies. Edit only
 with Edit/Write (commands still run only in the job folder: no git in the repo), never commit, and
 list the repo files you changed in your reply.
+
+**Asking for an OK.** When the guard denies a call saying it needs the user's OK (a skill, a
+subagent, the databricks CLI writing, a network or push command, a write tool, a file outside your
+folders), it has already recorded what is missing. Ask once, in the thread, in plain words:
+"🤖 🔐 **AQ-n · OK to <what, and why, in one line>?** React ✅ or reply *yes*. ❌ or *no* and I'll
+do without." Then end this run with the card's resting status (section 4). A yes resumes you with
+that kind of call allowed for the rest of this card (your prompt lists what is OK'd); retry it then.
+Any other reply drops the request: do without, or ask again if it still matters. Don't ask for the
+same thing twice in one run, and don't ask for what the hard rules forbid (sending, secrets).
 
 Read generously: users type fast on phones, and one reply can carry several things ("yes, but say
 Friday, and remember Sam is out next week"). Do all of them. The table lists common meanings, not

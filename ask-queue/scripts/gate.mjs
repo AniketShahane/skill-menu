@@ -107,6 +107,31 @@ function compact(msg) {
   return out;
 }
 
+// A reaction on a card's own OK request ("🤖 🔐 … OK to …?") answers it like a reply: ✅ is a yes,
+// ❌ a no. Only reactions on 🤖 posts made after the open proposal count, so an old ✅ never answers
+// a new ask; once answered, the proposal is gone and the reaction is not read again.
+const YES_REACTIONS = new Set(["white_check_mark", "heavy_check_mark", "+1", "thumbsup", "ok", "ok_hand"]);
+const NO_REACTIONS = new Set(["x", "-1", "thumbsdown", "no_entry", "no_entry_sign"]);
+
+function proposedSince(item) {
+  const times = [item.job?.permProposed?.length && item.job.permProposedAt, item.job?.repoProposed?.length && item.job.repoProposedAt]
+    .filter(Boolean)
+    .map((at) => Date.parse(at) / 1000)
+    .filter(Number.isFinite);
+  return times.length ? Math.min(...times) : null;
+}
+
+export function reactionAnswer(messages, userId, since) {
+  let answer = null;
+  for (const m of messages) {
+    if (!fromBot(m.text) || Number(m.ts) < since) continue;
+    const mine = (names) => (m.reactions || []).some((r) => names.has(r.name) && (r.users || []).includes(userId));
+    if (mine(NO_REACTIONS)) answer = { ts: m.ts, text: "no (❌ on your OK request)", reaction: true };
+    else if (mine(YES_REACTIONS)) answer = { ts: m.ts, text: "yes (✅ on your OK request)", reaction: true };
+  }
+  return answer;
+}
+
 async function threadMessages(call, channel, ts) {
   return (await paged(call, "conversations.replies", { channel, ts, limit: 200 })).filter((m) => m.ts !== ts);
 }
@@ -130,9 +155,11 @@ export async function collectInbox(store, call, clock) {
 
   const cards = [];
   for (const thread of threads.values()) {
-    const messages = (await threadMessages(call, thread.channelId, thread.cardTs))
-      .filter((m) => mine(m) && isNew(m, thread.lastSeen))
-      .map(compact);
+    const all = await threadMessages(call, thread.channelId, thread.cardTs);
+    const messages = all.filter((m) => mine(m) && isNew(m, thread.lastSeen)).map(compact);
+    const since = thread.ids.length === 1 ? proposedSince(store.getItem(thread.ids[0])) : null;
+    const answer = since === null ? null : reactionAnswer(all, userId, since);
+    if (answer) messages.push(answer);
     if (messages.length) cards.push({ ids: thread.ids, channelId: thread.channelId, cardTs: thread.cardTs, messages });
   }
 
@@ -189,9 +216,11 @@ export function routeInbox(store, inbox, clock) {
       try {
         const item = store.getItem(thread.ids[0]);
         if (item.status !== "filtered") {
+          // A reaction answer is not a message: it never moves the thread's seen mark.
           const seenTs = thread.messages
+            .filter((m) => !m.reaction)
             .map((m) => m.editedTs || m.ts)
-            .reduce((max, ts) => (compareTs(ts, max) > 0 ? ts : max));
+            .reduce((max, ts) => (max === null || compareTs(ts, max) > 0 ? ts : max), null);
           routeToCard(store, item.id, { messages: thread.messages, seenTs }, clock, { grant: true });
           routed.push(item.id);
           done = true;

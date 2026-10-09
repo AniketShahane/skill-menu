@@ -18,6 +18,7 @@ export function makeHome() {
   store.init();
   const config = store.config();
   config.slack = { userId: USER, selfDmId: SELF_DM };
+  config.workers = { prepDelayMin: 0 }; // tests start prep runs at once; the delay has its own test
   fs.writeFileSync(store.paths.config, JSON.stringify(config));
   return { home, store };
 }
