@@ -24,9 +24,10 @@ const SLACK = "mcp__claude_ai_Slack__";
 const GMAIL = "mcp__claude_ai_Gmail__";
 
 test("Slack: messages only to the user's own DM; drafts anywhere", () => {
-  assert.equal(call(`${SLACK}slack_send_message`, { channel_id: "D_ME", message: "card" }), "allow");
-  assert.equal(call(`${SLACK}slack_send_message`, { channel_id: "U_ME", message: "card" }), "allow");
-  assert.equal(call(`${SLACK}slack_send_message`, { channel_id: "C_TEAM", message: "hi" }), "deny");
+  assert.equal(call(`${SLACK}slack_send_message`, { channel_id: "D_ME", message: "🤖 card" }), "allow");
+  assert.equal(call(`${SLACK}slack_send_message`, { channel_id: "U_ME", message: "🤖 card" }), "allow");
+  assert.equal(call(`${SLACK}slack_send_message`, { channel_id: "D_ME", message: "card" }), "deny", "no 🤖: looks like the user");
+  assert.equal(call(`${SLACK}slack_send_message`, { channel_id: "C_TEAM", message: "🤖 hi" }), "deny");
   assert.equal(call(`${SLACK}slack_send_message`, { message: "no channel" }), "deny");
   assert.equal(call(`${SLACK}slack_send_message_draft`, { channel_id: "C_TEAM", message: "draft" }), "allow");
   assert.equal(call(`${SLACK}slack_schedule_message`, { channel_id: "C_TEAM" }), "deny");

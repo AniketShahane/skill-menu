@@ -101,7 +101,8 @@ Item fields you write: `title`, `askType` (kebab-case, reuse labels from playboo
 `excerpt`, `fingerprints`, `prep` (`need`, `output`, `basis`), `questions` (`n`, `q`, `guess`,
 `basis`, `answer`), `draft` (`kind`, `text`, `target`, `ref`, `url`), `card` (`channelId`, `ts`,
 `lastSeenTs`), `job` (`kind` `card` or `work`, `brief`, `repo`, `base`, `followUp`, `notice`,
-`result`; the rest belongs to dispatch.mjs, and `job` patches merge).
+`result`, `repoProposed`; the rest belongs to dispatch.mjs and the gate, including `repoWrites`, and
+`job` patches merge).
 
 Statuses: `new → asking → approving → drafted → done`, plus `skipped` and `filtered` (not an ask for
 the user; shown in a digest so it can be brought back). Work: `scoping → ready → working → review → done`.

@@ -45,10 +45,102 @@ export function modelIn(text) {
   return found ? found.at(-1) : null;
 }
 export const STOP_WORDS = /^\s*(stop|stop it|stop that|cancel|cancel that|hold on|pause)[\s.!]*$/i;
+
+// ---------- repo edits ----------
+// A card session edits files outside its job folder only when the user allowed that exact file
+// (job.repoWrites). Only code grants: the user's own card-thread replies (gate.mjs) and prompts the
+// user types into the session (guard.mjs prompt hook). A path named in that text is allowed at once;
+// a file the user described loosely is proposed by the session (job.repoProposed) and allowed by the
+// user's next reply if it is a yes. Any other reply drops the proposal. Files live under
+// config.repoEdit.roots; secrets never count.
+export const SECRET_FILE = /(^|\/)(\.env[^/]*|[^/]*\.env|credentials[^/]*|\.databricks-[^/]*)$/i;
+export const APPROVE_WORDS = /^\s*(yes|yep|yeah|y|ok|okay|sure|approved?|go ahead|do it|lgtm)\b/i;
+
+export function repoRoots(config) {
+  const roots = config?.repoEdit?.roots;
+  return Array.isArray(roots) ? roots.filter((r) => typeof r === "string" && path.isAbsolute(r)).map((r) => path.resolve(r)) : [];
+}
+
+const inside = (target, dir) => {
+  const rel = path.relative(dir, target);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+};
+
+// The real path of a file that may not exist yet (its folder must), so a symlink can't point elsewhere.
+export function realTarget(file) {
+  try {
+    return fs.realpathSync(file);
+  } catch {
+    try {
+      return path.join(fs.realpathSync(path.dirname(file)), path.basename(file));
+    } catch {
+      return path.resolve(file);
+    }
+  }
+}
+
+// A repo file a session may be allowed to edit: inside a root, not a secret, not under .git.
+export function repoFile(file, roots) {
+  if (typeof file !== "string" || !path.isAbsolute(file) || file.split("/").includes("..")) return null;
+  const real = realTarget(file);
+  if (!roots.some((root) => inside(real, realTarget(root)))) return null;
+  if (SECRET_FILE.test(real) || real.split("/").includes(".git")) return null;
+  return real;
+}
+
+// Paths named in a message: absolute ones inside a root (the file or its folder exists), relative ones
+// that are existing files under a root.
+export function pathsIn(text, roots) {
+  const found = new Set();
+  for (const raw of String(text || "").split(/[\s,;()<>`'"*]+/)) {
+    const word = raw.replace(/^file:\/\//, "").replace(/[.:!?]+$/, "");
+    if (!word || !(word.includes("/") || /\.[A-Za-z0-9]{1,8}$/.test(word))) continue;
+    const candidates = path.isAbsolute(word) ? [word] : roots.map((root) => path.join(root, word));
+    for (const candidate of candidates) {
+      const file = repoFile(candidate, roots);
+      if (!file) continue;
+      const exists = fs.existsSync(file);
+      if (exists ? fs.statSync(file).isFile() : path.isAbsolute(word) && fs.existsSync(path.dirname(file))) found.add(file);
+    }
+  }
+  return [...found];
+}
+
+// The job patch for the user's new text: named paths allowed, a yes allows the proposal, and the
+// proposal is cleared either way. Returns null when nothing changes.
+export function repoGrantPatch(job, texts, config) {
+  const roots = repoRoots(config);
+  if (!roots.length) return null;
+  const proposed = Array.isArray(job?.repoProposed) ? job.repoProposed : [];
+  const allowed = new Set(Array.isArray(job?.repoWrites) ? job.repoWrites : []);
+  const before = allowed.size;
+  for (const text of texts) for (const file of pathsIn(text, roots)) allowed.add(file);
+  if (proposed.length && texts.some((text) => APPROVE_WORDS.test(text))) {
+    for (const file of proposed) {
+      const real = repoFile(file, roots);
+      if (real) allowed.add(real);
+    }
+  }
+  if (allowed.size === before && !proposed.length) return null;
+  return { repoWrites: [...allowed], repoProposed: [], granted: [...allowed].slice(before) };
+}
+
+// Used by the prompt hook: applies the user's typed text to the card's grants.
+export function grantRepoEdits(store, id, texts, clock) {
+  return withItemLock(store, id, () => {
+    const item = store.getItem(id);
+    const grant = repoGrantPatch(item.job, texts, store.config());
+    if (!grant) return [];
+    const { granted, ...job } = grant;
+    const note = granted.length ? `repo edits allowed by the user: ${granted.join(", ")}` : "repo edit proposal dropped";
+    applyUpdate(store, id, { patch: { job }, note, internal: true }, clock);
+    return granted;
+  });
+}
 // Statuses whose card threads are checked for replies every run.
 const WATCH_STATUSES = ["asking", "approving", "drafted", ...WORK_STATUSES];
 // Job fields the model may set through `update --file`. The rest belong to dispatch.mjs.
-const JOB_MODEL_KEYS = new Set(["brief", "repo", "base", "followUp", "notice", "result", "kind"]);
+const JOB_MODEL_KEYS = new Set(["brief", "repo", "base", "followUp", "notice", "result", "kind", "repoProposed"]);
 // A type is offered for promotion after this many consecutive drafts went out unedited.
 export const PROMOTE_STREAK = 5;
 // Don't re-offer a declined promotion for a week.
@@ -66,6 +158,8 @@ const DEFAULT_CONFIG = {
   // gate.mjs: force a full sweep after this many quiet hours (reconcile drafts, learn).
   gate: { maxQuietHours: 6 },
   workers: {},
+  // Folders whose files a card session may edit once the user allows each file (empty: never).
+  repoEdit: { roots: [] },
 };
 
 // Background workers (dispatch.mjs). config.workers overrides any of these.
@@ -339,6 +433,15 @@ function applyUpdate(store, id, { patch = {}, status, note, internal = false } =
     if (patch.job.kind !== undefined && !JOB_KINDS.includes(patch.job.kind)) {
       throw new AqError(`job.kind must be one of ${JOB_KINDS.join(", ")}`);
     }
+    if (patch.job.repoProposed !== undefined && !internal) {
+      const roots = repoRoots(store.config());
+      const list = patch.job.repoProposed;
+      if (!Array.isArray(list) || list.length > 20) throw new AqError("job.repoProposed must be a list of up to 20 absolute paths");
+      const files = list.map((file) => repoFile(file, roots));
+      const bad = list.find((file, i) => !files[i]);
+      if (bad !== undefined) throw new AqError(`${bad} is not a repo file you can propose (config repoEdit.roots, no secrets)`);
+      patch = { ...patch, job: { ...patch.job, repoProposed: files } };
+    }
     // Merge, so setting job.followUp never wipes the session id.
     patch = { ...patch, job: { ...(item.job || {}), ...patch.job } };
   }
@@ -482,7 +585,8 @@ function formatMessage(m) {
 // Hands the user's new messages in a card thread to that card's session: appended to job.followUp
 // (earlier text kept), and the item queued (ready) unless its session is already queued or running.
 // seenTs (optional) marks the thread handled up to that message. Used by gate.mjs and `aq route`.
-export function routeToCard(store, id, { messages, seenTs = null } = {}, clock) {
+// grant: the messages are the user's own (gate.mjs only), so they may allow repo edits.
+export function routeToCard(store, id, { messages, seenTs = null } = {}, clock, { grant = false } = {}) {
   if (!Array.isArray(messages) || messages.length === 0) throw new AqError("route needs messages[]");
   for (const m of messages) {
     if (!m || typeof m.text !== "string") throw new AqError("each message needs text");
@@ -501,6 +605,13 @@ export function routeToCard(store, id, { messages, seenTs = null } = {}, clock) 
     };
     const model = messages.map((m) => modelIn(m.text)).filter(Boolean).at(-1);
     if (model) patch.job.model = model;
+    let note = "user message for the card session";
+    const repo = grant ? repoGrantPatch(job, messages.map((m) => m.text), store.config()) : null;
+    if (repo) {
+      const { granted, ...fields } = repo;
+      Object.assign(patch.job, fields);
+      if (granted.length) note += `; repo edits allowed: ${granted.join(", ")}`;
+    }
     let status;
     if (fresh.status === "working") {
       if (messages.some((m) => STOP_WORDS.test(m.text))) patch.job.stopRequested = nowIso(clock);
@@ -508,7 +619,7 @@ export function routeToCard(store, id, { messages, seenTs = null } = {}, clock) 
       status = "ready";
       patch.job.restingStatus = fresh.status;
     }
-    return applyUpdate(store, id, { patch, status, note: "user message for the card session", internal: true }, clock);
+    return applyUpdate(store, id, { patch, status, note, internal: true }, clock);
   });
   if (seenTs && item.card?.channelId && item.card?.ts) markSeen(store, item.card.channelId, item.card.ts, seenTs);
   return summarize(store.getItem(id));
@@ -676,16 +787,9 @@ export function headlessSettings(home, workerId) {
   const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
   if (workerId !== undefined && !/^AQ-\d+$/.test(String(workerId))) throw new AqError(`Invalid item id: ${workerId}`);
   const worker = workerId ? ` --worker ${workerId}` : "";
-  return {
-    env: { ASK_QUEUE_HOME: home },
-    hooks: {
-      PreToolUse: [
-        {
-          hooks: [{ type: "command", command: `node ${quote(guard)} ${quote(home)}${worker}`, timeout: 20 }],
-        },
-      ],
-    },
-  };
+  const hook = [{ hooks: [{ type: "command", command: `node ${quote(guard)} ${quote(home)}${worker}`, timeout: 20 }] }];
+  // Workers also see the user's typed prompts, which may allow repo edits (guard.mjs promptHook).
+  return { env: { ASK_QUEUE_HOME: home }, hooks: { PreToolUse: hook, ...(workerId ? { UserPromptSubmit: hook } : {}) } };
 }
 
 // ---------- CLI ----------

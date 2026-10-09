@@ -78,7 +78,13 @@ Change one with `$AQ config set workers.max 3`. Sweep and replies runs use `conf
 sonnet). A model name (`opus`, `sonnet`, `haiku`) in any card reply switches that card's sessions to
 it until changed; the card shows its model on a 🧠 line. A card session reacts 👀 to each of your
 card-thread messages when it reads them. A closed
-card keeps its session for 48 hours. Code work uses a git worktree at `jobs/AQ-n/work/repo` on a
+card keeps its session for 48 hours.
+
+Repo edits: `$AQ config set repoEdit.roots '["/path/to/repo"]'` lets card sessions read and search
+those folders (secrets like `.env` and `credentials*` stay closed) and edit a file there once you
+allow it. Name the path in a card reply or type it into the session to allow it. Or describe the file
+loosely: the session finds it, asks "OK to edit …?", and your yes allows it. Sessions never commit
+there. Empty (the default): sessions edit only their job folder. Code work uses a git worktree at `jobs/AQ-n/work/repo` on a
 local branch `aq/AQ-n-…`; when you're done with it, push the branch yourself and remove the
 worktree with `git worktree remove`.
 

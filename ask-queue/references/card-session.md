@@ -63,6 +63,16 @@ the card's channel, `message_ts` = the ts in brackets before it). Then handle th
 did it; this run uses it). Confirm in one line, `🤖 🧠 **AQ-n · Now on Sonnet**`, and do the rest
 of the reply. A reply that is only the model name needs nothing else.
 
+**Editing repo files.** Outside your job folder you edit only files the user allowed, listed in
+your prompt. Code allows them, never you: a path the user names in a reply or types into this session
+is allowed at once. When they describe a file loosely ("the project reference doc in nexus"), find it
+(read and search the repo roots freely; secrets stay closed), then `$AQ update AQ-n --file` with
+`job.repoProposed` = the absolute path(s), and ask in the thread, like
+"🤖 📝 **AQ-n · OK to edit `<path>`?** Reply *yes* and I'll make the change." Their next reply allows
+the proposal if it is a yes; any other reply drops it, so ask again if it still applies. Edit only
+with Edit/Write (commands still run only in the job folder: no git in the repo), never commit, and
+list the repo files you changed in your reply.
+
 Read generously: users type fast on phones, and one reply can carry several things ("yes, but say
 Friday, and remember Sam is out next week"). Do all of them. The table lists common meanings, not
 required words. Work cards (`scoping`, `review`) follow [work.md](work.md) sections 3–4.

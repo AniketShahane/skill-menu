@@ -28,6 +28,7 @@ import {
   enteredStatusAt,
   headlessSettings,
   listJobs,
+  repoRoots,
   resolveHome,
   updateItem,
   workerConfig,
@@ -259,9 +260,14 @@ This run uses ${model}: say so on the card (cards.md). If the user's new message
   const post = item.card?.ts
     ? `Card thread for every message (post only there, each starting with "🤖" and naming ${item.id}, formatted per references/cards.md): channel ${item.card.channelId}, thread_ts ${item.card.ts}`
     : `No card yet: post the card as ONE top-level message to channel ${selfDm} (no thread_ts), then record it with update (card.channelId, card.ts, card.lastSeenTs). After that, post only in its thread.`;
-  const where = `Job folder (the only place you may edit files or run commands; write --file inputs here): ${job.workDir}${
+  const roots = repoRoots(config);
+  const allowed = job.repoWrites?.length ? job.repoWrites.join(", ") : "none yet";
+  const repo = roots.length
+    ? `\nRepo files under ${roots.join(", ")}: read and search freely. Edit one only once the user allowed it (allowed now: ${allowed}); to ask, follow references/card-session.md "Editing repo files".`
+    : "";
+  const where = `Job folder (the only place you may run commands; write --file inputs here): ${job.workDir}${
     job.repoDir ? `\nCode: the git worktree at ${job.repoDir}, branch ${job.branch}` : ""
-  }
+  }${repo}
 ${post}
 State CLI: node ${aq}   (your item: get ${item.id}; you may update only ${item.id})
 Skill: ${SKILL_DIR}`;

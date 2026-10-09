@@ -192,7 +192,7 @@ export function routeInbox(store, inbox, clock) {
           const seenTs = thread.messages
             .map((m) => m.editedTs || m.ts)
             .reduce((max, ts) => (compareTs(ts, max) > 0 ? ts : max));
-          routeToCard(store, item.id, { messages: thread.messages, seenTs }, clock);
+          routeToCard(store, item.id, { messages: thread.messages, seenTs }, clock, { grant: true });
           routed.push(item.id);
           done = true;
         }

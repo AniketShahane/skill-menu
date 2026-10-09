@@ -7,11 +7,16 @@
 // fail-closed: edits and commands only inside the session's job folder (<home>/jobs/AQ-n), plus
 // memory/*.md; aq.mjs may change only its own item; Slack posts only in its own card thread, except
 // one top-level post of the card itself while the item has no card; the same draft-only MCP rules,
-// no push, no network commands.
+// no push, no network commands. Repo files (config.repoEdit.roots): read and searched freely except
+// secrets; edited only when the user allowed that exact file (job.repoWrites, see aq.mjs).
+//
+// The same command is the worker's UserPromptSubmit hook: a prompt the user types into the session
+// (anything that isn't dispatch.mjs's prompt) may allow repo edits, like a card-thread reply.
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { SECRET_FILE, createStore, grantRepoEdits, realTarget, repoRoots } from "./aq.mjs";
 
 const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -89,11 +94,11 @@ function loadDraftRefs(home) {
   return refs;
 }
 
-function loadCard(home, workerId) {
+function loadItem(home, workerId) {
   try {
-    return JSON.parse(fs.readFileSync(path.join(home, "items", `${workerId}.json`), "utf8")).card || null;
+    return JSON.parse(fs.readFileSync(path.join(home, "items", `${workerId}.json`), "utf8"));
   } catch {
-    return null;
+    return {};
   }
 }
 
@@ -103,14 +108,18 @@ export function makeContext(home, workerId) {
   // Set when the card's one top-level post is allowed. Outside the job folder, so the session can't
   // clear it; dispatch.mjs clears it when a prep run is retried.
   const marker = workerId ? path.join(resolved, "jobs", ".cardposts", workerId) : null;
+  const item = workerId ? loadItem(home, workerId) : {};
+  const config = loadConfig(home);
   return {
     home: resolved,
     skillDir: SKILL_DIR,
-    config: loadConfig(home),
+    config,
     draftRefs: () => loadDraftRefs(home),
     workerId: workerId || null,
     jobDir: workerId ? path.join(resolved, "jobs", workerId) : null,
-    card: workerId ? loadCard(home, workerId) : null,
+    card: item.card || null,
+    repoRoots: repoRoots(config),
+    repoWrites: Array.isArray(item.job?.repoWrites) ? item.job.repoWrites : [],
     cardPosted: () => Boolean(marker) && fs.existsSync(marker),
     markCardPosted: () => {
       fs.mkdirSync(path.dirname(marker), { recursive: true });
@@ -118,6 +127,8 @@ export function makeContext(home, workerId) {
     },
   };
 }
+
+const BOT_LEAD = /^(🤖|:robot_face:)/u;
 
 const allow = (reason) => ({ decision: "allow", reason });
 const deny = (reason) => ({ decision: "deny", reason });
@@ -143,6 +154,11 @@ function decideMcp(name, input, ctx) {
   if (server.includes("slack") && tool === "slack_add_reaction" && ctx.workerId) {
     if (ctx.card?.channelId && input?.channel_id === ctx.card.channelId) return allow("worker reacts in its card's DM");
     return deny("a worker may only react to messages in its card's DM");
+  }
+  // The gate tells the user's messages from ours by the 🤖 lead, and the user's replies can allow repo
+  // edits, so every post a guarded run makes must carry it.
+  if (server.includes("slack") && tool === "slack_send_message" && !BOT_LEAD.test(String(input?.message ?? input?.text ?? ""))) {
+    return deny("every message starts with 🤖 (references/cards.md)");
   }
   if (server.includes("slack") && tool === "slack_send_message" && ctx.workerId) {
     const card = ctx.card;
@@ -211,9 +227,10 @@ function decideWorkerAq(cmd, ctx) {
   return deny(`a card session may only read state and update ${ctx.workerId}`);
 }
 
-function decideWorkerBash(command, cwd, ctx) {
+function decideWorkerBash(command, cwd, ctx, background) {
   const cmd = String(command || "").trim();
   if (!cmd) return deny("empty command");
+  if (background) return deny("background commands are blocked for workers");
   if (/\baq\.mjs\b/.test(cmd)) {
     const verdict = decideWorkerAq(cmd, ctx);
     if (verdict.decision === "deny") return verdict;
@@ -244,7 +261,11 @@ function decideWorker(name, toolInput, input, ctx) {
     const target = path.resolve(cwd, typeof raw === "string" && raw ? raw : ".");
     const memory = path.join(ctx.home, "memory");
     if ([ctx.jobDir, memory, ctx.skillDir].some((dir) => isInside(target, dir))) return allow("read inside the job");
-    return deny("workers read only their job folder, memory/ and the skill");
+    if (ctx.repoRoots.some((root) => isInside(realTarget(target), realTarget(root)))) {
+      if (SECRET_FILE.test(target) || SECRET_FILE.test(realTarget(target))) return deny("secret files stay closed");
+      return allow("read inside a repo root");
+    }
+    return deny("workers read only their job folder, memory/, the skill and config repoEdit.roots");
   }
   if (name in WRITE_TOOLS) {
     const raw = toolInput[WRITE_TOOLS[name]];
@@ -253,9 +274,14 @@ function decideWorker(name, toolInput, input, ctx) {
     if (isInside(target, ctx.jobDir)) return allow("edit inside the job folder");
     // Card sessions learn on close (learn.md): the memory notes, and nothing else outside the job.
     if (path.dirname(target) === path.join(ctx.home, "memory") && target.endsWith(".md")) return allow("memory note");
-    return deny("workers edit only inside their job folder (and memory/*.md)");
+    // A repo file the user allowed by name or by a yes (aq.mjs repoGrantPatch).
+    if (ctx.repoWrites.includes(realTarget(target)) && !SECRET_FILE.test(realTarget(target))) return allow("repo file the user allowed");
+    return deny(
+      "workers edit only inside their job folder, memory/*.md and repo files the user allowed: propose the file " +
+        "(job.repoProposed) and ask the user to reply yes (references/card-session.md)",
+    );
   }
-  if (name === "Bash") return decideWorkerBash(toolInput.command, cwd, ctx);
+  if (name === "Bash") return decideWorkerBash(toolInput.command, cwd, ctx, Boolean(toolInput.run_in_background));
   if (name.startsWith("mcp__")) return decideMcp(name, toolInput, ctx);
   return deny(`${name} is not available to workers`);
 }
@@ -308,12 +334,35 @@ function log(home, input, result) {
   }
 }
 
+// Every dispatch.mjs prompt starts with this; anything else was typed by the user into the session.
+export const DISPATCH_PROMPT = /^You are the ask-queue card session for AQ-\d+:/;
+
+// UserPromptSubmit: the user's typed text may allow repo edits. Never blocks the prompt; on any error
+// nothing is allowed.
+export function promptHook(home, workerId, input) {
+  try {
+    const prompt = String(input?.prompt || "");
+    if (!prompt.trim() || DISPATCH_PROMPT.test(prompt.trimStart())) return [];
+    const granted = grantRepoEdits(createStore(path.resolve(home)), workerId, [prompt]);
+    log(home, { tool_name: "UserPromptSubmit" }, { decision: "grant", reason: granted.join(", ") || "none" });
+    if (granted.length) process.stdout.write(`ask-queue: the user allowed edits to ${granted.join(", ")}\n`);
+    return granted;
+  } catch (err) {
+    log(home, { tool_name: "UserPromptSubmit" }, { decision: "error", reason: err.message });
+    return [];
+  }
+}
+
 const isMain = process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
   try {
     const [home, flag, workerId] = process.argv.slice(2);
     if (!home || (flag && flag !== "--worker")) throw new Error("usage: guard.mjs <ASK_QUEUE_HOME> [--worker AQ-n]");
     const input = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (input.hook_event_name === "UserPromptSubmit") {
+      if (flag) promptHook(home, workerId, input);
+      process.exit(0);
+    }
     if (input.hook_event_name && input.hook_event_name !== "PreToolUse") process.exit(0);
     const result = decide(input, makeContext(home, flag ? workerId : undefined));
     log(home, input, result);
