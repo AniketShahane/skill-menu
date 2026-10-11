@@ -4,6 +4,7 @@ Agent skills for [Claude Code](https://docs.claude.com/en/docs/claude-code) and 
 
 On the menu:
 
+- **Expense Reconciliation** (new): match Monarch charges to receipts, prevent Splitwise duplicates, record exact sharers and amounts, and verify authorized updates.
 - **Ask Queue** (new): turns asks from Slack, Jira, Zoom and Gmail into cards in your own Slack DM, asks only what it can't work out, and prepares drafts you read and send. It learns from every ask. Built to replace Working Memory.
 - **Working Memory**: a daily planning ritual with a live visual board.
 - **Android App Craft** (new): build native Android apps (Kotlin + Compose, Material 3 Expressive) that look and move like a premium app. Comes with a starter app that builds and passes its tests.
@@ -12,6 +13,32 @@ On the menu:
   - Math and science use 3Blue1Brown-style Manim scenes.
   - History, art and essays use a new illustrated Remotion path with AI-generated and public-domain artwork.
   - Worked examples: Kalman filters (10 min) and an Aeon essay on medieval mental health (28 min).
+
+---
+
+## What Expense Reconciliation does
+
+Reconciles Monarch Money transactions with merchant or Gmail receipts and Splitwise expenses, one expense at a time.
+
+- **Identifies the purchase.** Checks dates, amounts and source identifiers; keeps uncertain matches explicit.
+- **Prevents duplicates.** Looks for individual, group and combined Splitwise entries before creating an expense.
+- **Records the exact split.** Confirms the payer, everyone sharing, whether you are included, and the allocation rule; preserves exact cents and rounding.
+- **Keeps notes concise and complete.** Uses readable lines for ownership, shares, refunds, unresolved questions and deferred Splitwise entries.
+- **Attaches evidence.** Prefers the receipt; if unavailable, uses a cropped Monarch screenshot showing only that transaction card.
+- **Verifies completion.** Reloads saved receipts, notes, shares, Monarch categories and review status. Pending charges keep their allocation in notes until an actual split is available.
+
+### Install for Codex
+
+From a checkout of this repository on the machine where you use Codex:
+
+```bash
+mkdir -p ~/.agents/skills
+cp -R expense-reconcile ~/.agents/skills/
+```
+
+Then ask: "Use $expense-reconcile to update my expenses awaiting review."
+
+For Claude Code, copy the same folder into `~/.claude/skills/` instead. Signed-in accounts and supported connectors or browser access are required separately. The repository stores reusable instructions and generic examples; receipts, screenshots and personal transaction records stay outside it. GitHub preserves this version; future local edits must be committed and pushed to update the backup.
 
 ---
 
@@ -189,6 +216,10 @@ Persistent overrides go in `~/.config/working-memory/ensure-studio.local.sh`, wh
 
 ```
 skill-menu/
+  expense-reconcile/
+    SKILL.md          # Monarch / receipts / Splitwise workflow
+    agents/openai.yaml # Codex skill-menu metadata
+    references/       # allocations, readable notes, execution and recovery
   ask-queue/
     SKILL.md          # rules, modes, state CLI
     references/       # sweep / replies / cards / learn / setup

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Expense Reconciliation"
+  short_description: "Match receipts, prevent duplicates, and finish splits"
+  default_prompt: "Use $expense-reconcile to match my Monarch charges to receipts, check Splitwise duplicates, and prepare exact shares for review."
+policy:
+  allow_implicit_invocation: true
