@@ -37,7 +37,7 @@ mkdir -p ~/.agents/skills
 cp -R expense-reconcile ~/.agents/skills/
 ```
 
-Then ask: "Use $expense-reconcile to update my expenses awaiting review."
+Then ask: "Let's review transactions" or "Let's reconcile transactions." The skill supports automatic selection for these requests; you can also invoke it explicitly with "Use $expense-reconcile to update my expenses awaiting review."
 
 For Claude Code, copy the same folder into `~/.claude/skills/` instead. Signed-in accounts and controllable, visible Codex in-app browser access are required separately for this workflow; it stops when that browser is unavailable. The repository stores reusable instructions and generic examples; receipts, screenshots and personal transaction records stay outside it. GitHub preserves this version; future local edits must be committed and pushed to update the backup.
 

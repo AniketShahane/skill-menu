@@ -1,6 +1,6 @@
 ---
 name: expense-reconcile
-description: Reconcile Monarch Money transactions with merchant or Gmail receipts and Splitwise expenses; identify purchases, prevent duplicates, calculate item allocations, attach readable receipt notes, and verify authorized splits and reviews.
+description: "Use when the user asks to review or reconcile personal spending, bank/card transactions, or expenses, including \"let's review transactions\" and \"let's reconcile transactions\", without needing to name the skill. Reconcile Monarch Money transactions with Gmail or merchant receipts and Splitwise expenses; identify purchases before ownership questions, prevent duplicates, calculate exact shares, record readable notes, and verify authorized updates."
 ---
 
 # Expense reconciliation
