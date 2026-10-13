@@ -29,7 +29,7 @@ Rounding adjustment
 • Final item allocations and participant totals both sum to $66.02.
 
 Fees and credits
-State whether included in item amounts or allocated separately. Describe the chosen rule and exact allocations. Never count the same tax or tip twice.
+State whether included in item amounts or allocated separately. Describe the chosen rule and exact allocations. Never count the same tax or tip twice. Distinguish rewards redeemed from rewards earned, show how rewards or other tenders reduce the bank payment, and do not deduct an already-applied credit again.
 
 ## Bank payment versus receipt total
 
@@ -37,7 +37,7 @@ A ride costs $53.17. Three earlier payments total $47.16; a later bank payment i
 
 ## Monarch note for a shared or deferred expense
 
-Purchase: [verified items or service; purchase/service date].
+Purchase: [verified items or service; quantities/prices when available; purchase/service date].
 Source: [order/ride/rental identifier and receipt link when available].
 Bank charge: [bank date, total, and currency].
 Paid by: [exact payer name].
@@ -48,18 +48,19 @@ Participants and shares
 • [Another exact participant name] — [amount].
 • You — [amount, explicitly $0.00 when excluded].
 Your share: [total]. Friends: [aggregate total].
-Fees/tax/credits/rounding: [how included or allocated; exact adjustment if any].
+Fees/tax/rewards/credits/rounding: [how included or allocated; redeemed versus earned rewards; exact adjustment if any].
+Refund: [applicable verified stage, amount/date, evidence, and remaining net charge; or no matching credit within stated search coverage].
 
 Splitwise: [saved expense link/ID and receipt status, not yet created, or deferred by user].
 If deferred: [reason and trigger needed before adding; e.g. attendance confirmation].
 Monarch: [pending or posted; actual split or note only]. Review status: [verified state].
 
-If participants or the split rule are missing, ask the user for this exact charge. Record unknown fields and the outstanding question instead of guessing. For a personal-only expense, replace the participant list with “Sole owner: [user]; no shared allocation.”
+If participants or the split rule are missing, identify and show the purchase from Gmail or authorized merchant receipt lookup first, then ask the user for ownership or allocation of this exact charge. Record unknown fields and the outstanding question instead of guessing. For a personal-only expense, replace the participant list with “Sole owner: [user]; no shared allocation.”
 
 ## Note for unresolved or refunded charge
 
 Known facts: descriptor, bank date and amount, source match.
-Refund: [posted date/amount and matching evidence, or no verified refund within stated coverage].
+Refund: [planned return, requested/promised refund, or posted date/amount and matching evidence; remaining net charge when established; or no verified refund within stated coverage].
 Ownership: [exact intended participants, payer, whether the user is included, and each share; explicitly unknown if unresolved].
 Splitwise: [saved expense link/ID, not created, or deferred; reason and trigger].
 Unresolved: [specific missing identity, order linkage, cancellation timestamp, participant, or allocation].

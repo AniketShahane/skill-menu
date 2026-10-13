@@ -20,12 +20,13 @@ On the menu:
 
 Reconciles Monarch Money transactions with merchant or Gmail receipts and Splitwise expenses, one expense at a time.
 
-- **Identifies the purchase.** Checks dates, amounts and source identifiers; keeps uncertain matches explicit.
+- **Uses the visible in-app browser.** Keeps the current Codex page visible, reopens missing tabs, and stops if in-app control is unavailable.
+- **Identifies the purchase before asking ownership.** Finds Gmail or authorized merchant receipts, shows the items or service, and checks dates, amounts and source identifiers; keeps uncertain matches explicit.
 - **Prevents duplicates.** Looks for individual, group and combined Splitwise entries before creating an expense.
 - **Records the exact split.** Confirms the payer, everyone sharing, whether you are included, and the allocation rule; preserves exact cents and rounding.
-- **Keeps notes concise and complete.** Uses readable lines for ownership, shares, refunds, unresolved questions and deferred Splitwise entries.
+- **Keeps notes concise and complete.** Records confirmed ownership, item details, tax/rewards treatment, refund status, shares, unresolved questions and deferred Splitwise entries in readable Monarch notes.
 - **Attaches evidence.** Prefers the receipt; if unavailable, uses a cropped Monarch screenshot showing only that transaction card.
-- **Verifies completion.** Reloads saved receipts, notes, shares, Monarch categories and review status. Pending charges keep their allocation in notes until an actual split is available.
+- **Verifies completion.** Reloads the visible page and reopens the exact transaction or expense to verify saved receipts, notes, shares, Monarch categories and review status. Pending charges keep their allocation in notes until an actual split is available.
 
 ### Install for Codex
 
@@ -38,7 +39,7 @@ cp -R expense-reconcile ~/.agents/skills/
 
 Then ask: "Use $expense-reconcile to update my expenses awaiting review."
 
-For Claude Code, copy the same folder into `~/.claude/skills/` instead. Signed-in accounts and supported connectors or browser access are required separately. The repository stores reusable instructions and generic examples; receipts, screenshots and personal transaction records stay outside it. GitHub preserves this version; future local edits must be committed and pushed to update the backup.
+For Claude Code, copy the same folder into `~/.claude/skills/` instead. Signed-in accounts and controllable, visible Codex in-app browser access are required separately for this workflow; it stops when that browser is unavailable. The repository stores reusable instructions and generic examples; receipts, screenshots and personal transaction records stay outside it. GitHub preserves this version; future local edits must be committed and pushed to update the backup.
 
 ---
 
