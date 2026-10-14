@@ -28,6 +28,7 @@ Reconciles Monarch Money transactions with merchant or Gmail receipts and Splitw
 - **Attaches evidence.** Prefers the receipt; if unavailable, uses a cropped Monarch screenshot showing only that transaction card.
 - **Saves confirmed work, then reports.** Once you confirm the purchase ownership, payer and split, saves the authorized expense, receipt and notes without another approval round for the same facts, verifies them, and summarizes exact changes for corrections. Required platform approvals still apply.
 - **Revisits charges when they post.** Each reconciliation run checks previously pending follow-ups, applies confirmed personal/Friends splits without duplicating Splitwise entries, and suggests a category when asking whether to mark a charge reviewed. Changed amounts and unresolved refunds stay open; posting and review status remain separate.
+- **Honors review decisions and deferrals.** Applies approvals to the exact transaction and suggested category, while keeping unreturned or refund-pending purchases unreviewed when requested. Preserves that decision across runs and excludes deferred charges from bulk review.
 - **Verifies completion.** Reloads the visible page and reopens the exact transaction or expense to verify saved receipts, notes, shares, Monarch categories and review status. Pending charges keep their allocation in notes until an actual split is available.
 
 ### Install for Codex

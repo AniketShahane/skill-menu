@@ -24,4 +24,6 @@ Prefer the original attachment/download. If no receipt is available, capture a M
 
 ## Completion criteria
 
+Map numbered approvals to their exact source charges. Complete an approved category/review action without another confirmation, while preserving explicit unreviewed deferrals for other charges. Verify the reviewed row and the excluded deferred row independently after reload; keep the deferral reason and release condition in the ledger. A completed lookup or posted bank status does not resolve a pending return or authorize review.
+
 A row is complete only for the actions requested: exact match established or uncertainty recorded; duplicate outcome documented; accepted financial shares persisted; required receipt and readable note present with confirmed ownership, item details, tax/rewards treatment, and refund status where applicable; pending note or posted split verified after reloading and reopening the exact transaction; each resulting review flag verified. Report remaining ambiguous and personal-only rows explicitly rather than declaring the entire merchant complete.

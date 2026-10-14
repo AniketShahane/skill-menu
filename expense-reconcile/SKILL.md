@@ -76,6 +76,14 @@ Monarch: retain the user's own appropriate category and allocate others' aggrega
 
 Mark the resulting portions reviewed only when requested or included in the authorized completion workflow. Notes do not themselves change review status. Pending and reviewed are separate states. For explicitly requested bulk reviews, first verify exact filtered date scope and count, then review only that scope and reload both the filtered result and excluded cutoff/later rows.
 
+## Apply review decisions and preserve explicit deferrals
+
+Resolve short or numbered replies against the exact transactions just presented. "Mark it reviewed" in response to a purchase and suggested category authorizes reviewing that transaction under that category; do it, verify after reload, and summarize without another confirmation. Do not apply that approval to other charges from the same merchant or to all rows in the review queue.
+
+"Not returned yet; keep it unreviewed" is an explicit transaction-specific deferral. Keep that charge unreviewed even if it is posted, personal-only, categorized, or fully matched to a receipt. Record the user's latest return status, the reason for holding review, and the next decision or evidence needed. Distinguish a planned return from a completed return, a promised refund and a posted credit; do not infer that any later stage happened.
+
+Carry the deferral forward in Monarch notes and the completion ledger. Exclude it from bulk review and automated completion until the user changes the instruction or its stated release condition is verified. When the instruction simply says to keep it unreviewed, a return/refund update is a reason to bring it back for a review decision, not permission to clear the flag. Avoid asking the same unchanged return-status question on every pass; resurface it when relevant evidence changes or the user asks. Verify both outcomes separately: the approved transaction is reviewed in its chosen category, and the deferred transaction remains unreviewed with the current reason and next step.
+
 ## Refunds and support
 
 Search all relevant history, including reviewed credits and dates after purchase. Check original descriptors, merchant aliases, partial and cumulative refunds, order identifiers, and refund emails. Reconcile net amounts; distinguish planned return, merchant refund promise, and posted bank credit. An unrelated equal-sized credit is not proof. State the search coverage when no refund was found.
