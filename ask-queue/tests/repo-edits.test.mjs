@@ -89,7 +89,7 @@ test("guard: repo reads open (not secrets); edits only to allowed files", () => 
   assert.equal(tool(home, id, "Read", { file_path: ref }), "allow");
   assert.equal(tool(home, id, "Grep", { pattern: "x", path: repo }), "allow");
   assert.equal(tool(home, id, "Read", { file_path: path.join(repo, ".env") }), "deny");
-  assert.equal(tool(home, id, "Read", { file_path: "/etc/hosts" }), "deny");
+  assert.equal(tool(home, id, "Read", { file_path: "/etc/hosts" }), "allow", "reads are free anywhere");
   assert.equal(tool(home, id, "Edit", { file_path: ref }), "deny", "not allowed yet");
 
   reply(store, id, `edit ${ref}`);

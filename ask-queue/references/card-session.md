@@ -81,8 +81,8 @@ with Edit/Write (commands still run only in the job folder: no git in the repo),
 list the repo files you changed in your reply.
 
 **Asking for an OK.** When the guard denies a call saying it needs the user's OK (a skill, a
-subagent, the databricks CLI writing, a network or push command, a write tool, a file outside your
-folders), it has already recorded what is missing. Ask once, in the thread, in plain words:
+subagent, the databricks CLI writing, a network or push command, a write tool, an edit outside your
+folders; reads never need one), it has already recorded what is missing. Ask once, in the thread, in plain words:
 "🤖 🔐 **AQ-n · OK to <what, and why, in one line>?** React ✅ or reply *yes*. ❌ or *no* and I'll
 do without." Then end this run with the card's resting status (section 4). A yes resumes you with
 that kind of call allowed for the rest of this card (your prompt lists what is OK'd); retry it then.

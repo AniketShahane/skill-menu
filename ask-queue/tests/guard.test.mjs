@@ -115,7 +115,9 @@ test("File tools: reads in data/skill dirs; edits only in memory, tmp, artifacts
   assert.equal(call("Read", { file_path: `${HOME}/memory/people.md` }), "allow");
   assert.equal(call("Read", { file_path: path.join(SKILL_DIR, "references", "sweep.md") }), "allow");
   assert.equal(call("Read", { file_path: "/home/user/.ssh/id_rsa" }), "deny");
-  assert.equal(call("Read", { file_path: `${HOME}/../../etc/passwd` }), "deny");
+  assert.equal(call("Read", { file_path: "/home/user/.slack/slack-token" }), "deny");
+  assert.equal(call("Read", { file_path: "/srv/notes/plan.md" }), "allow", "reads are free outside ask-queue");
+  assert.equal(call("Grep", { pattern: "x", path: "/srv/notes" }), "allow");
   assert.equal(call("Grep", { pattern: "Sam" }), "allow");
   assert.equal(call("Write", { file_path: `${HOME}/tmp/cand.json` }), "allow");
   assert.equal(call("Edit", { file_path: "memory/style.md" }), "allow");

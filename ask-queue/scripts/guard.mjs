@@ -9,8 +9,9 @@
 // one top-level post of the card itself while the item has no card; nothing is ever sent (drafts
 // only). Repo files (config.repoEdit.roots): read and searched freely except secrets; edited only
 // when the user allowed that exact file (job.repoWrites, see aq.mjs).
+// Reads are free everywhere except secrets and ask-queue state; only writes need approval.
 // Anything else that isn't a hard rule (a skill, a subagent, a write tool, a network or push command,
-// a read or edit elsewhere) needs the user's OK, once per kind per card: the call is denied, the kind
+// an edit elsewhere) needs the user's OK, once per kind per card: the call is denied, the kind
 // is recorded (job.permProposed) and the session asks in its card thread. A yes allows it (job.perms).
 // Never allowed, OK or not: secrets and tokens, the guard's own settings, ask-queue state outside
 // aq.mjs, sudo and crontab.
@@ -45,7 +46,7 @@ const WRITE_WORDS = new Set(
   ).split(" "),
 );
 const READ_WORDS = new Set(
-  "search get read list fetch lookup query download view describe find".split(" "),
+  "search get read list fetch lookup query download view describe find show check export render count browse inspect preview load info".split(" "),
 );
 
 export function toolWords(tool) {
@@ -334,7 +335,7 @@ function decideWorker(name, toolInput, input, ctx) {
     }
     if (ctx.repoRoots.some((root) => isInside(realTarget(target), realTarget(root)))) return allow("read inside a repo root");
     if (controlled(realTarget(target), ctx)) return deny("ask-queue state is read through aq.mjs");
-    return needOk(["read:anywhere"], "workers read their job folder, memory/, the skill and the repo roots on their own", ctx);
+    return allow("read anywhere (secrets and ask-queue state stay closed)");
   }
   if (name in WRITE_TOOLS) {
     const raw = toolInput[WRITE_TOOLS[name]];
@@ -381,7 +382,9 @@ export function decide(input, ctx) {
     const raw = toolInput[READ_TOOLS[name]];
     const target = path.resolve(cwd, typeof raw === "string" && raw ? raw : ".");
     if (isInside(target, ctx.home) || isInside(target, ctx.skillDir)) return allow("read inside ask-queue");
-    return deny("reads are limited to the ask-queue data and skill directories");
+    const real = realTarget(target);
+    if (SECRET_FILE.test(real) || PROTECTED.test(real)) return deny("secret files stay closed");
+    return allow("read anywhere (secrets stay closed)");
   }
 
   if (name in WRITE_TOOLS) {

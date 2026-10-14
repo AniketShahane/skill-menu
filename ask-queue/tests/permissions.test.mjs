@@ -93,6 +93,18 @@ test("network and push commands ask; secrets, state and sudo never open", () => 
   assert.equal(call("Bash", { command: `node ${AQ} update AQ-99 --status done` }).decision, "deny");
 });
 
+test("reads need no OK; writes still ask", () => {
+  const { id, call } = session();
+  assert.equal(call("Read", { file_path: "/etc/hostname" }).decision, "allow");
+  assert.equal(call("Grep", { pattern: "x", path: "/etc" }).decision, "allow");
+  assert.equal(call("Read", { file_path: "/home/u/.ssh/id_rsa" }).decision, "deny");
+  assert.equal(call("mcp__claude_ai_Lucid__lucid_export_document_as_PNG", {}).decision, "allow");
+  const write = call("Write", { file_path: "/etc/hostname" });
+  assert.equal(write.decision, "deny");
+  assert.match(write.reason, /needs the user's OK \(write:anywhere\)/);
+  assert.ok(id);
+});
+
 test("sending stays blocked, other write tools ask", () => {
   const { store, id, call } = session();
   updateItem(store, id, { patch: { job: { perms: ["mcp:send_message", "mcp:slack_send_message"] } }, internal: true });
