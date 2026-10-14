@@ -2,7 +2,7 @@
 
 ## What made the workflow fast
 
-Inventory and match a whole merchant/date batch once, rather than switching sites for every row. Present exact numbers visually so the user can approve several allocations at once. Use Gmail for item receipts, ride routes, cancellation notices and refund messages when merchant history is inaccessible. Keep separate source-charge and saved-expense identities so combined expenses and split tenders don't become duplicates.
+Inventory and match a whole merchant/date batch once, rather than switching sites for every row. Present exact numbers visually so the user can approve several allocations at once. Start with the actual merchant website and its order/receipt/payment history. Use Gmail for item receipts, ride routes, cancellation notices and refund messages only as a fallback when merchant evidence is missing or inaccessible. Ask the user to identify a charge only after both sources fail. Once ownership, payer and allocation are confirmed, complete authorized saves and reload verification before reporting exact results; do not add another approval round for the same confirmed facts. Keep separate source-charge and saved-expense identities so combined expenses and split tenders don't become duplicates.
 
 When delegation is requested or permitted, give each merchant investigation an independent read-only agent. Once ownership is confirmed, give a completion agent the full source facts, existing expense identity, saved shares, allowed mutations and verification checklist. Serialize writers touching the same account, expense or browser; independent readers can run concurrently when sessions permit it. Don't flood the user's visible tab with competing agents.
 

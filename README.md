@@ -21,11 +21,12 @@ On the menu:
 Reconciles Monarch Money transactions with merchant or Gmail receipts and Splitwise expenses, one expense at a time.
 
 - **Uses the visible in-app browser.** Keeps the current Codex page visible, reopens missing tabs, and stops if in-app control is unavailable.
-- **Identifies the purchase before asking ownership.** Finds Gmail or authorized merchant receipts, shows the items or service, and checks dates, amounts and source identifiers; keeps uncertain matches explicit.
+- **Identifies the purchase before asking ownership.** Checks the actual merchant website first, uses Gmail as a fallback, and asks you to identify the charge only after both fail. Shows the items or service and checks dates, amounts and source identifiers; keeps uncertain matches explicit.
 - **Prevents duplicates.** Looks for individual, group and combined Splitwise entries before creating an expense.
 - **Records the exact split.** Confirms the payer, everyone sharing, whether you are included, and the allocation rule; preserves exact cents and rounding.
 - **Keeps notes concise and complete.** Records confirmed ownership, item details, tax/rewards treatment, refund status, shares, unresolved questions and deferred Splitwise entries in readable Monarch notes.
 - **Attaches evidence.** Prefers the receipt; if unavailable, uses a cropped Monarch screenshot showing only that transaction card.
+- **Saves confirmed work, then reports.** Once you confirm the purchase ownership, payer and split, saves the authorized expense, receipt and notes without another approval round for the same facts, verifies them, and summarizes exact changes for corrections. Required platform approvals still apply.
 - **Verifies completion.** Reloads the visible page and reopens the exact transaction or expense to verify saved receipts, notes, shares, Monarch categories and review status. Pending charges keep their allocation in notes until an actual split is available.
 
 ### Install for Codex
