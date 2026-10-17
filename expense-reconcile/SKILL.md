@@ -1,11 +1,11 @@
 ---
 name: expense-reconcile
-description: "Use when the user asks to review or reconcile personal spending, bank/card transactions, or expenses, including \"let's review transactions\" and \"let's reconcile transactions\", without needing to name the skill. Reconcile Monarch Money transactions with merchant website receipts first, Gmail as a fallback, and Splitwise expenses; identify purchases before ownership questions, prevent duplicates, calculate exact shares, record readable notes, and verify authorized updates."
+description: "Use when the user asks to review or reconcile personal spending, bank/card transactions, or expenses, including \"let's review transactions\" and \"let's reconcile transactions\", without needing to name the skill. Reconcile Monarch Money transactions with merchant website receipts first, Gmail as a fallback, and Splitwise expenses; identify purchases before ownership questions, prevent duplicates, calculate exact shares, record readable notes, verify authorized updates, and import the user's share of expenses paid by others in Splitwise into Monarch without double-counting settlements."
 ---
 
 # Expense reconciliation
 
-Turn bank charges into an inspectable purchase table, let the user assign ownership, and finish authorized updates in Splitwise and Monarch. Support lookup-only, proposed splits, existing-expense completion, refund investigation, and explicitly requested bulk reviews. Read [allocation and note examples](references/allocations-and-notes.md) when calculating shares or writing receipts. Read [execution and recovery](references/execution-and-recovery.md) for batches, delegated work, interruptions, and final verification.
+Turn bank charges into an inspectable purchase table, let the user assign ownership, and finish authorized updates in Splitwise and Monarch. Support lookup-only, proposed splits, existing-expense completion, refund investigation, importing expenses paid by others from Splitwise into Monarch, and explicitly requested bulk reviews. Read [allocation and note examples](references/allocations-and-notes.md) when calculating shares or writing receipts. Read [execution and recovery](references/execution-and-recovery.md) for batches, delegated work, interruptions, and final verification.
 
 ## Establish the current scope
 
@@ -47,6 +47,12 @@ Inspect Splitwise individual, group, and combined expenses. Search when availabl
 When the user says they added an expense, locate that existing entry and read its saved shares. Do not create another. Preserve accepted combined expenses, saved dates, and rounding, even if the suggested item-by-item split differed by a cent. If payer/participants or meaningful amounts conflict, resolve before changing financial fields. A delayed partial bank payment for an already recorded ride must not become a new expense.
 
 If Splitwise blocks creation with a daily limit, give the user exact totals, payer, participants, and shares to enter manually. Resume receipts and notes after their confirmation. Do not buy Pro, fabricate a save, or repeatedly attempt blocked creation.
+
+## Import expenses paid by others from Splitwise into Monarch
+
+When the user requests tracking expenses other people added for them, start with the saved Splitwise expense and its activity, payer, exact personal share, category, comments and attachment. This source-first mode differs from investigating an unidentified bank charge: the user did not pay the merchant, so do not search their merchant account for somebody else's order. Read [Splitwise-to-Monarch imports](references/splitwise-to-monarch.md) before the first import or settlement reconciliation.
+
+Import only the user's saved share under the existing Monarch category for the underlying purchase, using a dedicated manual tracking account rather than inventing a charge on the user's synced bank/card. Preserve the Splitwise expense ID/link in the note as the stable duplicate key. An explicit request to add one example authorizes that one supported import, its ordinary category and source note; do not expand to every recent expense or modify the original Splitwise entry. Distinguish the date it was added from the purchase/expense date. Check existing Monarch transactions and settlement coverage before saving, and reload/reopen the result to verify the account, date, sign, exact amount, category, note and review state. Categorized imported expenses and later repayments must be counted only once; preserve historical settlement treatment outside the authorized scope.
 
 ## Allocate exact cents
 
