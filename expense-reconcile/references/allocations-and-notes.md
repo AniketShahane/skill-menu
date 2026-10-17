@@ -1,98 +1,55 @@
-# Allocations and readable notes
+# Exact allocations, tiny notes
 
-Use these as formatting examples, not real account records or default participants. In Monarch and Splitwise, keep notes concise but exhaustive: short labeled lines, item/participant bullets, current status first, and applicable facts only. Consolidate repeated updates instead of accumulating an audit diary.
+Notes should be super concise, clear and simple: normally 3-5 short lines and at most about 50 words. One line is enough for a simple personal purchase. These examples are generic, not account records. Read the saved app fields and receipt together with the note; the note is not a second receipt or audit log.
 
-## Single item split
+## Personal purchase
 
-Description: Air fryer
-Total: $53.25
-You: $26.63
-Friend: $26.62
-Rounding: the extra cent is yours.
+Personal: tennis backpack.
 
-## Mixed ownership
+Omit the merchant, date, amount, category and card if already visible. Add an order link only when useful for later matching or a return.
 
-A $61.40 order contains a $29.00 tumbler owned by you and $32.40 of shared tea. Equal tea shares are $16.20 each. If Splitwise contains only the tea expense, its total stays $32.40. The matching full Monarch charge splits $45.20 to you and $16.20 to Friends; never put the tumbler into the shared expense.
+## Shared purchase, waiting to post
 
-## Readable combined-expense note
+Plunger: me $2.66; Priya $2.66.
+Pending - split after posting; keep unreviewed.
+Splitwise: [expense link]
 
-Purchase details
-• Item A — $25.90: you $12.95; friend $12.95.
-• Item B — $24.79: you $12.40; friend $12.39.
-• Item C — $7.99: you $4.00; friend $3.99.
-• Item D — $7.34: you $3.67; friend $3.67.
+The link is also the stable duplicate key. Do not repeat it as a separate expense ID. If no Splitwise expense exists, replace the link line with "Splitwise not added: [reason/trigger]" and retain the exact shares.
 
-Rounding adjustment
-• Item-by-item proposal: you $33.02; friend $33.00.
-• Saved equal split accepted by user: $33.01 each.
-• Adjust one cent from your Item B share to the friend's share: $12.39 / $12.40.
-• Final item allocations and participant totals both sum to $66.02.
+## Expense paid by someone else
 
-Fees and credits
-State whether included in item amounts or allocated separately. Describe the chosen rule and exact allocations. Never count the same tax or tip twice. Distinguish rewards redeemed from rewards earned, show how rewards or other tenders reduce the bank payment, and do not deduct an already-applied credit again.
+Dinner paid by Priya; my share $32.71.
+Includes tip.
+Splitwise: [expense link]
 
-## Bank payment versus receipt total
+The manual account and spending category are already saved fields. Do not repeat the full bill, the payer's other share, bank card, receipt URL, import explanation or future-settlement policy in the note.
 
-A ride costs $53.17. Three earlier payments total $47.16; a later bank payment is $6.01. Record the later charge as the remaining payment for the original ride date. If the full ride is already in Splitwise, do not add $6.01 again. Do not automatically apply the full ride's friend amount to the $6.01 bank payment; obtain or document a consistent payment allocation first.
+## Refund or explicit deferral
 
-## Monarch note for a shared or deferred expense
+Personal air mattress; return not completed.
+Keep unreviewed until return/refund decision.
+Order: [link]
 
-Purchase: [verified items or service; quantities/prices when available; purchase/service date].
-Source: [order/ride/rental identifier and receipt link when available].
-Bank charge: [bank date, total, and currency].
-Paid by: [exact payer name].
-Allocation status: [confirmed, proposed/conditional, or unknown].
+Or, for verified progress: "Refund promised $80; bank credit not seen through [date]." Preserve the relevant search cutoff when the absence of a credit matters, not a search diary.
 
-Participants and shares
-• [Exact participant name] — [amount and item ownership when relevant].
-• [Another exact participant name] — [amount].
-• You — [amount, explicitly $0.00 when excluded].
-Your share: [total]. Friends: [aggregate total].
-Fees/tax/rewards/credits/rounding: [how included or allocated; redeemed versus earned rewards; exact adjustment if any].
-Refund: [applicable verified stage, amount/date, evidence, and remaining net charge; or no matching credit within stated search coverage].
+## Conditional split
 
-Splitwise: [saved expense link/ID and receipt status, not yet created, or deferred by user].
-If deferred: [reason and trigger needed before adding; e.g. attendance confirmation].
-Monarch: [pending or posted; actual split or note only]. Review status: [verified state].
+Movie tickets: Alex $21; Priya $21; Sam $21; me $0.
+Attendance unconfirmed; Splitwise deferred.
+Order: [link]
 
-If participants or the split rule are missing, identify and show the purchase from Gmail or authorized merchant receipt lookup first, then ask the user for ownership or allocation of this exact charge. Record unknown fields and the outstanding question instead of guessing. For a personal-only expense, replace the participant list with “Sole owner: [user]; no shared allocation.”
+## Mixed ownership or combined expenses
 
-## Note for unresolved or refunded charge
+Keep a short ownership summary in the note; put a compact item/allocation table in the receipt or private ledger. Include an extra line only for an exception affecting the saved amounts.
 
-Known facts: descriptor, bank date and amount, source match.
-Refund: [planned return, requested/promised refund, or posted date/amount and matching evidence; remaining net charge when established; or no verified refund within stated coverage].
-Ownership: [exact intended participants, payer, whether the user is included, and each share; explicitly unknown if unresolved].
-Splitwise: [saved expense link/ID, not created, or deferred; reason and trigger].
-Unresolved: [specific missing identity, order linkage, cancellation timestamp, participant, or allocation].
-Next step: [only the necessary action].
+Example: A $61.40 purchase contains a personal $29 tumbler and $32.40 shared tea. The user's share is $45.20 and the friend's is $16.20. If Splitwise records only tea, leave its total $32.40; do not add the tumbler. A sufficient note is "Tumbler mine; tea shared. Me $45.20; Priya $16.20. Splitwise: [link]".
 
-## User-entry table
+## Exact math stays exact
 
-| Expense | Total paid by you | Your share | Friend A | Friend B | Date |
-|---|---:|---:|---:|---:|---|
-| [verified purchase] | [total] | [share] | [share] | [share] | [expense date] |
+Use integer cents. Item allocations, expense shares and the user's personal/Friends totals must agree with the bank charge and accepted Splitwise record. Preserve saved rounding. For an odd-cent equal split, keep the accepted $26.63/$26.62 shares; explain the extra cent in the receipt/ledger only if needed. Do not invent offsetting item/tax allocations just to narrate an even total.
 
-Clearly state which expenses are already saved and must not be entered again.
+Include tax/tip/fees/discounts once. Distinguish rewards redeemed from rewards earned. For split tenders or delayed payments, retain how the receipt total becomes this bank charge in supporting evidence. A $6.01 delayed payment on an already recorded $53.17 ride is not a new ride or new Splitwise expense. Mention this exception briefly and link the original source.
 
-## Compact personal expense
+## Before saving
 
-Return planned; awaiting review.
-Purchase: Personal item, [purchase date]; order [verified ID].
-Paid: USD $80.00 by [payer], card [last four].
-Sole owner: [user] $80.00; Friends $0.00.
-Refund: Not verified; return not yet completed.
-Splitwise: Not needed. Next: verify return and refund.
-
-## Compact conditional shared expense
-
-Attendance unconfirmed; Splitwise deferred by user.
-Purchase: 3 paid movie tickets, [show date]; order [verified ID].
-Paid: USD $63.00 by [payer], card [last four].
-Proposed shares:
-• [Guest A] $21.00
-• [Guest B] $21.00
-• [Guest C] $21.00
-• [User] $0.00 (ticket covered separately)
-Friends: $63.00. Each ticket: $19.00 + $2.00 tax; fee waived.
-Monarch: Note only; awaiting review.
-Next: confirm attendance before creating Splitwise expense.
+Remove facts already visible in app fields. Remove verification narration, repeated status, irrelevant unknowns and normal-policy boilerplate. Check that the remaining note still identifies the purchase/ownership, preserves any pending action or explicit deferral, and links the right source. Add a line only to prevent a material mistake.

@@ -8,6 +8,14 @@ When delegation is requested or permitted, give each merchant investigation an i
 
 A handoff must resolve every conversational reference. Include dates, exact source amounts, participant names, payer, item ownership, fee rule, saved rounding, pending/posted rule, duplicate-search coverage, evidence links, and outstanding work. Exclude unrelated account history and sensitive identifiers. Root remains accountable for terminal verification, not just dispatch.
 
+## Daily coverage and checkpoint
+
+At each run, note its start time and the user's timezone. Read all unreviewed Monarch rows across accounts/dates, plus Splitwise activity from the earlier of yesterday's local midnight or the last successfully covered activity cutoff. Always inspect today and yesterday; after a gap, cover the entire unchecked interval. Select by activity time, including additions, edits, relevant comments, refunds, deletions and settlements on old expenses.
+
+Use a private reconciliation ledger in the authorized local task location. Store source expense ID, last inspected activity time, linked Monarch transaction IDs, exact saved share/category, verification result and unresolved next action. Keep private evidence here or in receipts, not in long account notes or this public skill. Reuse it across runs; do not use a date in an account note or a run that merely started as proof of coverage.
+
+Only advance the Splitwise covered-through cutoff after every activity event through that run's recorded start is checked and its result saved/verified or retained on the unresolved list. A source-scan failure leaves its checkpoint unchanged; record any partial coverage. Revisit unresolved entries even after the checkpoint advances. Events arriving during the run are caught next time. Without a reliable checkpoint, cover today/yesterday and disclose unknown older coverage. Never create a checkpoint claiming an interval that was not inspected.
+
 ## Resume without duplicating
 
 Begin a reconciliation run by revisiting in-scope charges previously deferred because they were pending. Verify posting and final amount, match any replacement transaction ID, complete confirmed outstanding personal/Friends splits, and surface category/review decisions. Preserve unresolved refunds or other explicit deferrals; do not mark a charge reviewed merely because it posted. Reuse and verify the existing Splitwise entry. Record the current posting, split and review states separately in the completion ledger.
@@ -26,4 +34,4 @@ Prefer the original attachment/download. If no receipt is available, capture a M
 
 Map numbered approvals to their exact source charges. Complete an approved category/review action without another confirmation, while preserving explicit unreviewed deferrals for other charges. Verify the reviewed row and the excluded deferred row independently after reload; keep the deferral reason and release condition in the ledger. A completed lookup or posted bank status does not resolve a pending return or authorize review.
 
-A row is complete only for the actions requested: exact match established or uncertainty recorded; duplicate outcome documented; accepted financial shares persisted; required receipt and readable note present with confirmed ownership, item details, tax/rewards treatment, and refund status where applicable; pending note or posted split verified after reloading and reopening the exact transaction; each resulting review flag verified. Report remaining ambiguous and personal-only rows explicitly rather than declaring the entire merchant complete.
+A row is complete only for the actions requested: exact match established or uncertainty recorded; duplicate outcome documented; accepted financial shares persisted; required receipt present and tiny note correct; detailed ownership/item/tax/rewards evidence retained in the receipt or private ledger where needed; pending note or posted split verified after reloading and reopening the exact transaction; each resulting review flag verified. Report remaining ambiguous and personal-only rows explicitly rather than declaring the entire merchant complete.

@@ -8,7 +8,7 @@ Find the actual person in saved contacts. Inspect recent activity to establish w
 
 Inspect an attached receipt when available. Preserve saved rounding. Distinguish an itemized merchant receipt from a bank screenshot, and document gaps in items, tax or final posting. A tip comment may explain a difference; calculate it in cents, do not add it again to a saved total that already includes it. If no merchant receipt exists, a clear Splitwise record can support an explicitly labeled source-based import; do not invent itemization or claim the payer's bank charge is verified as posted.
 
-Use a verified purchase/service date when known, otherwise the saved expense date; separately note the added date. A today-only selection uses the user's timezone and activity timestamps. Do not silently convert currency or use the full group bill as the user's expense.
+Use a verified purchase/service date when known, otherwise the saved expense date; separately note the added date. The routine activity window covers today/yesterday or since the last successful checkpoint, whichever starts earlier, using the user's timezone. Filter updates by activity timestamps, including changes to old expenses. Do not silently convert currency or use the full group bill as the user's expense.
 
 ## Prevent duplicate spending
 
@@ -30,16 +30,12 @@ Once the personal share is recorded as an expense, its later repayment is a tran
 
 Create a manual expense for the exact personal share, with the underlying merchant in the description and the existing purchase category. Mark reviewed only when authorized; report the saved state. Keep the original Splitwise financial record unchanged unless separately asked.
 
-Use short labeled notes with applicable fields:
+Use the tiny-note format from [allocations and notes](allocations-and-notes.md):
 
-Imported personal share; paid by another person in Splitwise.
-Purchase: [items/service; purchase date]. Added to Splitwise: [date].
-Payer: [saved name]; full bill: [currency and total].
-Saved shares: You [amount]; payer/other participants [amounts relevant to explaining the split].
-Monarch expense: [your amount] under [category]; manual account [name].
-Fees/tax/tip/rounding: [verified treatment; identify gaps].
-Splitwise expense ID: [stable ID]
-Source: [expense link]; attachment: [type/link, if available].
-Settlement: [verified coverage or unresolved status]; do not count repayment of this imported share as spending again.
+[Purchase] paid by [person]; my share [amount].
+[One material exception or pending action, only if needed.]
+Splitwise: [expense link]
+
+The source link contains the stable expense ID. Do not repeat the ID, full bill, card, account, category, receipt breakdown, other people's shares or settlement policy when already available from saved fields and source evidence. Keep detailed evidence and settlement coverage in the private ledger. Existing import updates, refunds and settlement corrections use the same short format.
 
 Reload Monarch and reopen the exact new entry. Verify a single saved source ID, personal amount/sign/currency, category, date, manual account, source note, balance behavior and review state. Confirm that a retry did not create another copy. Report the source title, personal amount, category, account, date and any remaining limitation. Keep actual account records and personal examples out of public skill files.
