@@ -5,6 +5,8 @@ description: "Use when the user asks to review or reconcile personal spending, b
 
 # Expense reconciliation
 
+Monarch should capture the user's personal spending regardless of who paid. When someone else pays, import only the user's saved Splitwise share into its purchase category. When the user pays for others, record their own share in its purchase category and others' shares in Friends, and maintain the corresponding receivable in Splitwise. Reconcile repayments so each purchase counts once. Apply the pending/posted and authorization rules below.
+
 Turn bank charges into an inspectable purchase table, let the user assign ownership, and finish authorized updates in Splitwise and Monarch. Support lookup-only, proposed splits, existing-expense completion, refund investigation, importing expenses paid by others from Splitwise into Monarch, and explicitly requested bulk reviews. Read [allocation and note examples](references/allocations-and-notes.md) when calculating shares or writing receipts. Read [execution and recovery](references/execution-and-recovery.md) for batches, delegated work, interruptions, and final verification.
 
 ## Establish the current scope
