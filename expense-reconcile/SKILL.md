@@ -125,3 +125,22 @@ Contact support only when explicitly authorized. Verify a monitored official cha
 After every save, reload the visible in-app page, reopen the exact transaction or expense, and verify the actual persisted shares, payer, attachment, note, source amount, categories, split sums, and review status applicable to the action. Verify ownership/shares, relevant exception or deferral, and source link survived the reload; verify every Splitwise participant block, item subtotal, adjustments and final total against the saved financial shares and receipt; verify Monarch notes remain concise, with further evidence in its receipt or private ledger. If verification is unavailable or the saved content differs, report the action as unverified or incomplete and resolve only that step before claiming completion. Splitwise editing can recalculate a rounding cent; restore accepted shares using normal supported input and verify again. An upload click, draft, optimistic toast, or attempted split is not completion.
 
 Report verified outcomes concisely: receipt/note saved, exact own/Friends amounts, reviewed or still pending, duplicate excluded, and unresolved issue. Keep a per-source completion ledger during long work. Never say an entire merchant is done when only a subset is verified. Clearly separate lookup results, proposed changes, saved changes, and remaining blockers.
+
+### End-of-day recap
+
+After a reconciliation session or daily run with meaningful changes, proactively give a concise, easy-to-scan recap of what was done that day in the user's timezone. Build it from the verified completion ledger and the latest approvals, including earlier work that day, rather than only the last transaction discussed. Older purchase dates do not make an expense newly created today.
+
+Present **all transaction details in compact Markdown tables**, using the same clean style throughout the recap. Do not switch to transaction bullet lists, dense paragraphs or comma-separated purchase lists after the first table. Use short section labels and omit empty sections. Suggested tables:
+
+| Section | Columns | What to show |
+|---|---|---|
+| Added to Splitwise | Purchase, Total, Your share, Other people's shares | Newly created expenses; name each participant and give exact cents. State the payer and attachment/breakdown status briefly. |
+| Existing shared purchases completed | Purchase, Total, Your share, Other people's shares | Existing Splitwise entries reused or updated and the Monarch work completed today. |
+| Personal purchases reviewed | Purchase, Amount, Category, Bank status | Each personal purchase cleared; distinguish pending bank charges from posted charges. |
+| Imported from Splitwise | Purchase, Paid by, Your share | Personal shares imported into Monarch from expenses paid by others; these are existing Splitwise expenses, not new additions there. |
+| Credits and refunds | Credit/refund, Amount, Status | Posted credits, offsetting debit/credit pairs and any refund updates, clearly labeled. |
+| Still open | Purchase, Amount, Next step | Every unresolved review item and material decision or posting check outside the review queue. |
+
+Adapt columns to the actual work. Use one purchase per row, plain purchase names, short cells, dollar signs and two decimal places. Right-align numeric money columns. Combine only related charges with the same treatment, showing their individual amounts or a clear breakdown; list separate purchases separately. A brief sentence outside the tables may state the work date, who paid, a meaningful verified subtotal, or that receipts and notes were saved. Keep the recap compact and put detailed receipt math, technical IDs and search history in the private ledger; link records only when useful.
+
+State pending bank status separately from review status and distinguish an allocation note from an actual saved split. Distinguish new expenses from existing entries reused, updated or merely rechecked. Count each source purchase once in totals; if reporting split-row counts, label them as rows. Do not present mixed expenses, imports, receivables and credits as a new-spending total. Use the final verified state instead of repeating superseded pending steps or previously completed actions as new work. Keep no-change unattended runs quiet.
