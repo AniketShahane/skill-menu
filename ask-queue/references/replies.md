@@ -35,6 +35,7 @@ Otherwise (no gate token), find them yourself:
    `replies:selfdm` (no checkpoint: last hour). Consider only top-level messages without 🤖.
 5. Note threads: for the user's top-level messages from the last 48 hours that have replies, read
    the thread; new are user messages without 🤖 after checkpoint `note:<parent ts>` (none: all).
+   Skip a message that is an item's `card.ts` (a direct ask): its thread is a card thread, step 2.
 
 Session notices (no inbox: items in `$AQ list --open` whose `job.notice` is set) need posting too.
 
@@ -57,6 +58,7 @@ There are no commands. Decide what each message is for:
 
 | The message is | Example | Do |
 |---|---|---|
+| a direct ask: it opens with "Claude," or "Claude:" | "Claude, which amendments went live in Sep?" | Write `{"ts": …, "text": …, "editedTs": …}` to `tmp/direct-<ts>.json` and run `$AQ direct --file tmp/direct-<ts>.json`. That message becomes the card: its own session reacts 👀, does the task and answers in its thread. Post nothing yourself. (With a gate token the gate does this before you run, so you won't see these.) |
 | about an existing card | "the Sam one: say Friday", "AQ-12 yes" | Pass it to that card's session: `$AQ route AQ-n --file` (no `seenTs`). Reply in this message's thread: `🤖 Passed to AQ-12.` |
 | something to do | "draft a reply to Lee's email about the offsite", "pull Q3 churn by region into a doc" | New item (`$AQ add`, status `new`): `source.kind` `manual`, fingerprint `manual:{ts}`, `who` = the user. Its card session preps it and posts the card. Reply: `🤖 Took this as a new ask (AQ-21).` |
 | a fact to remember | "Priya likes bullet points" | Memory, tagged `(note, <date>)`. Reply in its thread: `🤖 Noted in people.md.` |

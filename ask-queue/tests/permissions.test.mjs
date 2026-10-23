@@ -152,7 +152,7 @@ test("sweep and replies runs may pipe aq.mjs into a text filter, nothing else", 
 test("a new ask waits prepDelayMin before its card session is queued", () => {
   const { home, store } = makeHome();
   const config = store.config();
-  config.workers = { prepDelayMin: 10 };
+  config.workers = { prepDelayMin: 10, precheckWaitMin: 0 };
   fs.writeFileSync(store.paths.config, JSON.stringify(config));
   const id = addItem(store);
   const created = Date.parse(store.getItem(id).createdAt);

@@ -3,6 +3,7 @@
 // Output: JSON on stdout. Errors: JSON {"error": "..."} on stderr and exit code 1.
 // Pass long or free-form text through --file (a JSON file under tmp/), never as shell arguments.
 
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -44,6 +45,10 @@ export function modelIn(text) {
   const found = String(text || "").toLowerCase().match(/\b(opus|sonnet|haiku)\b/g);
   return found ? found.at(-1) : null;
 }
+// A top-level self-DM message that starts "Claude, …" (or "Claude:") is a direct ask: the message
+// itself is the card, and its session does the task and answers in that message's thread.
+export const DIRECT_ASK = /^\s*(?:hey\s+|hi\s+)?@?claude\s*[,:]/i;
+export const DIRECT_BRIEF = "Direct ask: the user's own self-DM message is the card. Do what it asks and answer in its thread (references/card-session.md section 5).";
 export const STOP_WORDS = /^\s*(stop|stop it|stop that|cancel|cancel that|hold on|pause)[\s.!]*$/i;
 
 // ---------- repo edits ----------
@@ -217,6 +222,7 @@ export const WORKER_DEFAULTS = {
   cardModel: "sonnet", // card runs
   cardEffort: "medium", // card runs (claude --effort); work runs use the default effort
   prepDelayMin: 10, // a new ask waits this long before its card session starts, so the user can claim it
+  precheckWaitMin: 45, // past prepDelayMin, an ask the sweep never pre-checked starts its session anyway
 };
 
 const DEFAULT_STATE = {
@@ -510,6 +516,109 @@ function applyUpdate(store, id, { patch = {}, status, note, internal = false } =
   item.history.push(event);
   store.saveItem(item);
   return item;
+}
+
+// ---------- direct asks ----------
+
+const directTitle = (text) => {
+  const body = String(text).replace(DIRECT_ASK, "").replace(/\s+/g, " ").trim();
+  if (body.length <= 70) return body || "Direct ask";
+  return `${body.slice(0, 70).replace(/\s+\S*$/, "")}…`;
+};
+
+// Creates the item for a direct ask ({ts, text, editedTs}). Its card is the user's own message, so no
+// card is posted and no pre-check runs: the user asked for it. Same message again: duplicate.
+export function addDirect(store, { ts, text, editedTs } = {}, clock) {
+  if (typeof ts !== "string" || !/^\d+\.\d+$/.test(ts)) throw new AqError("direct needs the message ts");
+  if (typeof text !== "string" || !DIRECT_ASK.test(text)) throw new AqError('a direct ask starts with "Claude," or "Claude:"');
+  const selfDmId = store.config().slack?.selfDmId;
+  if (!selfDmId) throw new AqError("slack.selfDmId is not set: run setup first");
+  const result = addCandidate(
+    store,
+    {
+      title: directTitle(text),
+      source: { kind: "direct", who: "you", where: "your self-DM", channelId: selfDmId, ts },
+      excerpt: text,
+      fingerprints: [`direct:${ts}`],
+      direct: true,
+      card: { channelId: selfDmId, ts, lastSeenTs: editedTs && compareTs(editedTs, ts) > 0 ? editedTs : ts },
+    },
+    clock,
+  );
+  // An edit of a direct ask already taken goes to its session like a thread reply.
+  if (result.action === "duplicate" && editedTs) {
+    const item = store.getItem(result.id);
+    if (item.direct && compareTs(editedTs, item.card?.lastSeenTs || ts) > 0) {
+      routeToCard(store, item.id, { messages: [{ ts, editedTs, text }], seenTs: editedTs }, clock);
+      return { action: "edited", id: item.id };
+    }
+  }
+  return result;
+}
+
+// ---------- pre-check ----------
+// A harvested ask waits for the sweep to check it is still needed before its card session starts
+// (the user replied or reacted, another card has it, or one of the user's own Claude sessions is on
+// it). `precheck` lists what waits; `precheck AQ-n --file` records the verdict.
+
+export const PRECHECK_VERDICTS = ["needed", "handled", "duplicate", "in-progress"];
+
+// Asks that need a pre-check: harvested (not manual or direct), never carded, old enough.
+export function needsPrecheck(item, now, delayMin = 0) {
+  if (item.status !== "new" || item.direct || item.card || item.precheck) return false;
+  if (["manual", "direct"].includes(item.source?.kind)) return false;
+  return now - Date.parse(item.createdAt || 0) >= delayMin * 60_000;
+}
+
+const threadOf = (source = {}) => (source.channelId ? `${source.channelId}|${source.threadTs || source.ts}` : null);
+
+// The user's other Claude sessions (not ask-queue's own AQ-n ones), for the "already on it" check.
+export function claudeSessions(env = process.env) {
+  try {
+    const out = execFileSync(env.ASK_QUEUE_CLAUDE_BIN || "claude", ["agents", "--json", "--all"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 20_000,
+    });
+    return JSON.parse(out)
+      .filter((s) => !/^AQ-\d+\b/.test(String(s.name || "")))
+      .map((s) => ({ name: s.name || null, state: s.state || null, live: Boolean(s.pid), startedAt: s.startedAt ? new Date(s.startedAt).toISOString() : null, cwd: s.cwd || null }));
+  } catch {
+    return null; // couldn't ask: judge from Slack alone
+  }
+}
+
+export function precheckList(store, clock, sessions = claudeSessions) {
+  const now = (clock ? clock() : new Date()).getTime();
+  const delay = Number(workerConfig(store).prepDelayMin) || 0;
+  const items = store.allItems();
+  const waiting = items.filter((item) => needsPrecheck(item, now, delay));
+  if (!waiting.length) return { items: [], sessions: [] };
+  const recent = (item) =>
+    OPEN_STATUSES.includes(item.status) || now - Date.parse(enteredStatusAt(item)) < AFTER_CLOSE_WATCH_MS;
+  return {
+    items: waiting.map((item) => ({
+      id: item.id,
+      title: item.title,
+      createdAt: item.createdAt,
+      source: item.source,
+      excerpt: item.excerpt || null,
+      sameThread: items
+        .filter((other) => other.id !== item.id && threadOf(other.source) && threadOf(other.source) === threadOf(item.source) && recent(other))
+        .map((other) => ({ id: other.id, status: other.status, title: other.title })),
+    })),
+    sessions: sessions(),
+  };
+}
+
+export function recordPrecheck(store, id, { verdict, reason, relatedTo } = {}, clock) {
+  if (!PRECHECK_VERDICTS.includes(verdict)) throw new AqError(`verdict must be one of ${PRECHECK_VERDICTS.join(", ")}`);
+  if (typeof reason !== "string" || !reason.trim()) throw new AqError("precheck needs a one-line reason");
+  const item = store.getItem(id);
+  if (item.status !== "new") throw new AqError(`${id} is ${item.status}: only new asks are pre-checked`);
+  const precheck = { verdict, reason: reason.trim().slice(0, 300), at: nowIso(clock), ...(relatedTo ? { relatedTo } : {}) };
+  const status = verdict === "needed" ? undefined : "skipped";
+  return summarize(updateItem(store, id, { patch: { precheck }, status, note: `pre-check: ${verdict}: ${precheck.reason}`, internal: true }, clock));
 }
 
 export function summarize(item) {
@@ -866,6 +975,9 @@ const USAGE = `usage: aq.mjs <command>
   list [--open] [--watch] [--status a,b]
   seen <channelId> <cardTs> <messageTs> mark user messages up to messageTs handled (forward-only)
   route <id> --file <msgs.json>          pass card-thread messages to the card's session ({messages, seenTs})
+  direct --file <msg.json>              a "Claude, …" self-DM message ({ts, text, editedTs}) becomes its own card
+  precheck                              new asks waiting for the sweep's pre-check (plus the user's Claude sessions)
+  precheck <id> --file <verdict.json>   record it ({verdict: needed|handled|duplicate|in-progress, reason, relatedTo})
   get <id>
   update <id> [--status s] [--file patch.json] [--note text]
   ledger add --file <entry.json> | ledger find <query> [--limit n]
@@ -927,6 +1039,11 @@ export function run(argv, env = process.env, clock) {
         },
         clock,
       );
+    case "direct":
+      return addDirect(store, readInputFile(home, flags.file), clock);
+    case "precheck":
+      if (!positional[0]) return precheckList(store, clock, () => claudeSessions(env));
+      return recordPrecheck(store, positional[0], readInputFile(home, flags.file), clock);
     case "get":
       return store.getItem(positional[0]);
     case "seen":

@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import {
   AFTER_CLOSE_WATCH_MS,
   CARD_BRIEF,
+  DIRECT_BRIEF,
   SKILL_DIR,
   TRANSITIONS,
   createStore,
@@ -151,22 +152,38 @@ export function prepareWorkspace(home, item) {
   return job;
 }
 
-// New asks get their card session: queued to prep the ask and post its card, once they are
-// workers.prepDelayMin old (the user often picks an ask up themselves first; the session checks).
-function queuePreps(store, now, delayMin = 0) {
+// New asks get their card session: queued to prep the ask and post its card. A harvested ask waits
+// for the sweep's pre-check ("needed"; any other verdict already skipped it), so the user's own
+// replies, duplicates and work already under way never start a session. It waits
+// workers.prepDelayMin first (the user often picks an ask up), and starts anyway if no pre-check
+// came within precheckWaitMin more. Direct asks ("Claude, …") and the user's own asks start at once.
+function queuePreps(store, now, config = {}) {
+  const delayMin = Number(config.prepDelayMin) || 0;
+  const waitMin = Number(config.precheckWaitMin) || 0;
   const queued = [];
   for (const item of store.allItems().filter((i) => i.status === "new")) {
-    if (now - Date.parse(item.createdAt || 0) < delayMin * 60_000) continue;
+    const age = now - Date.parse(item.createdAt || 0);
+    const harvested = !item.direct && !item.card && !["manual", "direct"].includes(item.source?.kind);
+    let note = "queued for its card session";
+    if (item.direct) {
+      // no wait: the user asked for it
+    } else if (age < delayMin * 60_000) {
+      continue;
+    } else if (harvested && item.precheck?.verdict !== "needed") {
+      if (age < (delayMin + waitMin) * 60_000) continue;
+      note = "queued for its card session (no pre-check in time)";
+    }
     const patch = {
-      job: { kind: "card", brief: item.job?.brief || CARD_BRIEF, restingStatus: "new" },
+      job: { kind: "card", brief: item.job?.brief || (item.direct ? DIRECT_BRIEF : CARD_BRIEF), restingStatus: "new" },
     };
     // An item brought back from the filtered digest still points at the digest thread: it needs its own card.
-    if (item.card) {
+    // A direct ask's card is the user's own message: keep it.
+    if (item.card && !item.direct) {
       patch.previousCard = item.card;
       patch.card = null;
       fs.rmSync(cardPostMarker(store.paths.home, item.id), { force: true });
     }
-    updateItem(store, item.id, { patch, status: "ready", note: "queued for its card session", internal: true }, () => now);
+    updateItem(store, item.id, { patch, status: "ready", note, internal: true }, () => now);
     queued.push(item.id);
   }
   return queued;
@@ -203,7 +220,7 @@ export function tick({ home = resolveHome(), clock, spawnSupervisor = defaultSpa
       result.reaped.push(item.id);
     }
     result.expired = expireSessions(store, now);
-    result.prepQueued = queuePreps(store, now, Number(config.prepDelayMin) || 0);
+    result.prepQueued = queuePreps(store, now, config);
 
     let running = store.allItems().filter((i) => i.status === "working").length;
     let { runs } = readCounter(home, now);
@@ -294,6 +311,13 @@ ${where}`;
   if (!item.card?.ts) {
     return `${head}
 ${intro}Prep this ask and post its card (card-session.md section 1).${replies ? `\nNews that arrived before the card was posted:${replies}` : ""}
+${where}`;
+  }
+  if (item.direct && !job.sessionStarted) {
+    return `${head}
+${intro}This is a direct ask: the user wrote to you in their self-DM, and that message is the card. Do what it asks and answer in its thread (card-session.md section 5). Their message (ts ${item.card.ts}):
+${item.excerpt || item.title}
+${replies ? `\nTheir replies under it since:${replies}` : ""}
 ${where}`;
   }
   if (!job.sessionStarted) {

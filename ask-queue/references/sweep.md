@@ -1,17 +1,19 @@
 # Sweep
 
-Runs every 2 hours. Capture new asks since the last sweep and add them to the queue. You don't
-prep them: each new ask gets its own card session ([card-session.md](card-session.md)), which
-`scripts/dispatch.mjs` starts as soon as this run ends, and which preps the ask, posts its card and
-handles every reply. Then post the filtered digest, reconcile drafts and learn ([learn.md](learn.md)).
+Runs every 15 minutes (the gate skips quiet ones). Capture new asks since the last sweep and add them
+to the queue. You don't prep them: each new ask gets its own card session
+([card-session.md](card-session.md)), which preps the ask, posts its card and handles every reply.
+A session costs far more than this run, so a later sweep first checks each ask still needs one
+(step 5). Then post the filtered digest, reconcile and learn ([learn.md](learn.md)).
 
 ## Contents
 1. Window
 2. Harvest (per source)
 3. Candidate bar
 4. Add and de-duplicate
-5. The filtered digest
-6. Finish
+5. Pre-check waiting asks
+6. The filtered digest
+7. Finish
 
 ## 1. Window
 
@@ -70,16 +72,42 @@ card thread and re-preps if the ask changed. Write
 `tmp/route-AQ-n.json` and run `$AQ route AQ-n --file tmp/route-AQ-n.json` (no `seenTs`: this is
 not a card-thread message). A `filtered` item can't take follow-ups that way: leave it in the digest.
 
-## 5. The filtered digest
+## 5. Pre-check waiting asks
+
+`$AQ precheck` lists asks that are `workers.prepDelayMin` (10) minutes old and still wait for this
+check, with `sameThread` (other cards on the same Slack thread) and `sessions` (the user's own Claude
+Code sessions: name, state, start time; `null` if they couldn't be listed). Nothing listed: skip this
+step. For each ask, read its source thread once (`slack_read_thread`) and the ask's reactions
+(`slack_get_reactions` on the ask's `ts`), then pick ONE verdict:
+
+| verdict | When | Effect |
+|---|---|---|
+| `handled` | The user wrote in the thread after the ask (any reply, even a question back: they're on it), or reacted 👀 ✋ ✅ to it, or someone else answered it and the asker is satisfied. | skipped, silently |
+| `duplicate` | A `sameThread` card (or another open card) already covers the same ask. Set `relatedTo`. If the new message adds something (a deadline, a new detail), also pass it on: `$AQ route <relatedTo>` as in step 4. | skipped |
+| `in-progress` | One of the user's sessions is clearly on this work (its name matches the topic, e.g. `wash-trading-methodology-review` for "demo your wash trading method"), and it is `working` or started after the ask. Name the session in `reason`. | skipped |
+| `needed` | None of the above, or unsure. | its card session starts |
+
+Unsure means `needed`: a missed ask costs more than one session. Write
+`{"verdict": "…", "reason": "<one line with the evidence>", "relatedTo": "AQ-m"}` to
+`tmp/pre-AQ-n.json` and run `$AQ precheck AQ-n --file tmp/pre-AQ-n.json`. An ask nobody checks
+starts anyway after `workers.precheckWaitMin` (45) more minutes.
+
+## 6. The filtered digest
 
 If any items were created as `filtered` this sweep, post ONE digest message to
 `config.slack.selfDmId` (cards.md) and set each filtered item's `card` to
 `{ "channelId": selfDmId, "ts": <digest ts>, "lastSeenTs": <digest ts> }`. Post nothing else: cards
 for new asks come from their card sessions.
 
-## 6. Finish
+## 7. Finish
 
 1. Reconcile `drafted` items and run the learn steps ([learn.md](learn.md)).
+   **Cards the user handled themselves** (at most every 2 hours: checkpoint `reconcile:open`): for
+   each `asking`, `approving` or `scoping` item from a Slack source, read the source thread with
+   `oldest` = `card.ts`. If the user answered the asker there, or said they're on it, post
+   `🤖 ⏭️ **AQ-n · Closed: you answered in the thread**` in the card thread, set `skipped` with
+   `--note "the user handled it in the source thread"`, and add a ledger entry (learn.md section 2).
+   Then `$AQ checkpoint set reconcile:open <sweepStartedAt>`.
 2. For each source that succeeded: `$AQ checkpoint set <source> <sweepStartedAt>`. Leave a failed
    source's checkpoint alone so the next sweep retries the same window.
 3. Source failures: at most once per day per source (`$AQ checkpoint get alert:<source>` is today's

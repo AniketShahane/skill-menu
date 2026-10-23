@@ -27,8 +27,8 @@ passes their new messages to you in the prompt (oldest first, `[ts] text`). An e
 
 ## 1. First run: prep the ask and post its card
 
-0. **Is the user already on it?** The session starts `workers.prepDelayMin` (10) minutes after the
-   ask arrived, because the user often picks it up first. Read the source thread
+0. **Is the user already on it?** The sweep pre-checked this ask (`precheck` on the item: its
+   verdict and reason), but the user may have acted since. Read the source thread
    (`slack_read_thread`) and the ask's reactions (`slack_get_reactions`, or a detailed
    `slack_read_channel` read). If the user replied after the ask, or reacted to it with 👀, ✋ or ✅,
    they have it: post nothing, `$AQ update AQ-n --status skipped --note "the user picked it up"` and
@@ -138,3 +138,23 @@ Then `$AQ update AQ-n --status drafted --file <job folder>/AQ-n.json` with the d
 | posted a work result or a question mid-work | `review` |
 | closed it | `done`, `skipped` or `filtered` (plus the ledger entry) |
 | nothing changed | the status it had (`$AQ get` shows it as `job.restingStatus`) |
+
+## 5. Direct asks ("Claude, …")
+
+The user wrote to you in their self-DM, and their message is the card (`direct: true`, `card.ts` =
+their message). There is no card to post and no draft to approve: they asked you, so do it.
+
+1. React `eyes` on their message (`card.ts`) so they know you have it.
+2. Work out what they want. Read memory, the ledger and whatever sources the task needs.
+3. Do it, then answer in the thread, starting `🤖 ✅ **AQ-n ·** `. Lead with the answer, short
+   enough to read on a phone; links behind words (cards.md).
+   - A question: answer it, with the sources you used.
+   - A reply or message for someone else: deliver it as a draft (section 3), never sent.
+   - Real work (a doc, an analysis, code): no scope card unless something is truly unclear. Write
+     the brief and set `ready` with `job.kind` `work` (work.md section 3), and say in the thread that
+     you're on it. Their message counts as "go".
+   - Blocked on one decision only they can make: ask it in the thread (one question, your best guess
+     and its basis) and set `asking`.
+4. Hard rules still hold: drafts only, ask for an OK the guard needs (section 2), never invent facts.
+5. End status: `done` once answered (ledger entry, learn.md), `review` when they should look at a
+   result, `asking` when blocked. A reply in the thread resumes you like any card reply (section 2).

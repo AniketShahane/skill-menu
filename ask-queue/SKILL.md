@@ -16,7 +16,9 @@ Every ask becomes one card in the user's Slack self-DM, and every card ends in o
 Do the homework before asking: read the thread, the linked docs and memory. Ask only what is left.
 
 ```
-sweep (every 2h)     capture asks ─▶ add to the queue ─▶ digest of filtered ones ─▶ reconcile ─▶ learn
+sweep (every 15m)    capture asks ─▶ add to the queue ─▶ pre-check waiting asks ─▶ digest ─▶ reconcile ─▶ learn
+direct ask           "Claude, …" at the top of the self-DM ─▶ that message is the card ─▶ its session
+                     does the task and answers in the message's thread
 card session         one Claude session per card, for its whole life:
                      prep ─▶ card in self-DM ─▶ reply ─▶ resume ─▶ draft ─▶ reply ─▶ resume ─▶ …
                      work: scope ─▶ Q&A ─▶ go ─▶ same session does it ─▶ result in the thread ─▶ review
@@ -24,14 +26,18 @@ replies (every 2m)   card-thread replies go straight to their session (gate.mjs,
                      a Claude run only for top-level messages, the digest, promotion offers, notices
 ```
 
-Every card has its own Claude session (card-session.md). `scripts/dispatch.mjs` (no model) starts
-it for a new ask and resumes the same session for every reply in the card thread, so a fix after a
+Every card has its own Claude session (card-session.md). A session costs far more than a check, so
+a harvested ask waits for the sweep's pre-check (sweep.md step 5): asks the user already answered,
+duplicates of an open card, and work one of the user's own Claude sessions is already doing are
+skipped without one. `scripts/dispatch.mjs` (no model) starts the session for an ask that passes and resumes the same session for every reply in the card thread, so a fix after a
 mistake keeps the full context of the earlier rounds. Replies become drafts. Anything bigger (a doc,
 an analysis, code) is real work: scoped in its card thread until nothing is unclear, then the same
 session does it and reports in the same thread (work.md). Up to 5 sessions run at once.
 
 The user only ever writes plain language, in a card's thread or at the top of the self-DM. There
-are no commands to learn: work out what they mean (replies.md).
+are no commands to learn: work out what they mean (replies.md). A top-level message that opens with
+"Claude," is a direct ask: it becomes its own card, and its session answers in that message's
+thread (card-session.md section 5).
 
 `scripts/gate.mjs` runs before every scheduled run, with no model. With a read-only Slack token it
 checks for new messages, hands card-thread replies to their sessions, and starts a Claude run only
@@ -91,6 +97,8 @@ Unattended runs (cron) have no one to answer: never ask in chat; decide, record 
 | `list --open` / `list --watch` | open items / card threads to check (open, plus closed or filtered in the last 48h) |
 | `seen <channelId> <cardTs> <msgTs>` | mark the user's messages in a card thread handled up to `msgTs` (forward-only) |
 | `route AQ-n --file tmp/r.json` | pass messages (`{messages, seenTs}`) to that card's session and queue it |
+| `direct --file tmp/d.json` | a "Claude, …" self-DM message (`{ts, text, editedTs}`) becomes its own card |
+| `precheck` / `precheck AQ-n --file tmp/p.json` | asks waiting for the sweep's check / record its verdict (`needed`, `handled`, `duplicate`, `in-progress`) |
 | `get AQ-n` / `update AQ-n [--status s] [--file tmp/p.json] [--note text]` | read / patch an item |
 | `ledger add --file tmp/l.json` / `ledger find <words>` | record a closed ask / search past asks and artifacts |
 | `stats`, `promote`/`demote`/`decline <type>`, `propose <type> --ts <ts>` | autonomy ladder |
@@ -99,7 +107,7 @@ Unattended runs (cron) have no one to answer: never ask in chat; decide, record 
 
 Item fields you write: `title`, `askType` (kebab-case, reuse labels from playbooks.md), `source`
 (`kind`, `who`, `where`, `url`, `channelId`, `ts`, `threadTs`, `issueKey`, `threadId`, `messageId`),
-`excerpt`, `fingerprints`, `prep` (`need`, `output`, `basis`), `questions` (`n`, `q`, `guess`,
+`excerpt`, `fingerprints`, `direct`, `precheck` (`verdict`, `reason`, `relatedTo`), `prep` (`need`, `output`, `basis`), `questions` (`n`, `q`, `guess`,
 `basis`, `answer`), `draft` (`kind`, `text`, `target`, `ref`, `url`), `card` (`channelId`, `ts`,
 `lastSeenTs`), `job` (`kind` `card` or `work`, `brief`, `repo`, `base`, `followUp`, `notice`,
 `result`, `repoProposed`; the rest belongs to dispatch.mjs and the gate, including `repoWrites`, and

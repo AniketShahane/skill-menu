@@ -75,8 +75,10 @@ Everything else that isn't a hard rule (skills, subagents, network and push comm
 writes, write tools, files elsewhere) is asked for in the card thread: react ✅ or reply *yes* and
 that kind of call is allowed for the rest of that card. Only code grants, so a Slack ✅ or *yes*
 counts only when the gate (it needs the token) reads it; without the gate, type *yes* into the
-session in Claude Code's agent view. A new ask waits `prepDelayMin` 10 minutes before its session starts;
-if by then you replied in its thread or reacted 👀, the session leaves it alone.
+session in Claude Code's agent view. A new ask waits `prepDelayMin` 10 minutes, then the sweep checks it
+still needs a session: if you replied or reacted 👀, another card has it, or one of your own Claude
+sessions is on it, no session starts. Unchecked after `precheckWaitMin` 45 more minutes, it starts anyway.
+Start a self-DM message with "Claude," to ask directly: the answer comes in that message's thread.
 Limits live in `config.workers`: `max` 5 sessions at once, `dailyRuns` 100 runs a day;
 card runs `cardModel` sonnet, `cardEffort` medium, `cardTimeLimitMin` 20; work runs `model` opus,
 `timeLimitMin` 60. There's no per-run dollar cap: `claude --max-budget-usd` only works in `-p` mode.

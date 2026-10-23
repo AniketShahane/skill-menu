@@ -16,7 +16,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { compareTs, computeStats, createStore, listItems, resolveHome, routeToCard } from "./aq.mjs";
+import {
+  DIRECT_ASK,
+  addDirect,
+  compareTs,
+  computeStats,
+  createStore,
+  listItems,
+  needsPrecheck,
+  resolveHome,
+  routeToCard,
+  workerConfig,
+} from "./aq.mjs";
 import { tick } from "./dispatch.mjs";
 
 export const EXIT_RUN = 0;
@@ -143,7 +154,8 @@ export async function collectInbox(store, call, clock) {
   const mine = (m) => m.user === userId && !fromBot(m.text);
 
   const threads = new Map();
-  for (const item of listItems(store, { watch: true }, clock)) {
+  const watched = listItems(store, { watch: true }, clock);
+  for (const item of watched) {
     const key = `${item.card.channelId}|${item.card.ts}`;
     const thread = threads.get(key) || { channelId: item.card.channelId, cardTs: item.card.ts, ids: [], lastSeen: null };
     thread.ids.push(item.id);
@@ -183,8 +195,11 @@ export async function collectInbox(store, call, clock) {
 
   // Replies under the user's own top-level messages ("no, that was just a note"). Each thread has its
   // own mark (checkpoint note:<parentTs>), so a reply landing mid-check can't be skipped.
+  // A direct ask's thread is its card's, read above: not a note thread.
+  const cardTs = new Set(watched.filter((item) => item.card.channelId === selfDmId).map((item) => item.card.ts));
   const noteThreads = [];
   for (const parent of parents) {
+    if (cardTs.has(parent.ts)) continue;
     const mark = checkpoints[`note:${parent.ts}`] || parent.ts;
     if (!parent.latest_reply || compareTs(parent.latest_reply, mark) <= 0) continue;
     const messages = (await threadMessages(call, selfDmId, parent.ts))
@@ -194,6 +209,38 @@ export async function collectInbox(store, call, clock) {
   }
 
   return { createdAt: now.toISOString(), cards, proposals, topLevel, noteThreads, notices: workerNotices(store) };
+}
+
+// "Claude, …" messages at the top of the self-DM become their own cards here, with no Claude run:
+// dispatch starts the session, which answers in the message's thread. Returns the item ids.
+export function takeDirectAsks(store, inbox, clock) {
+  const taken = [];
+  const rest = [];
+  let newest = null;
+  for (const msg of inbox.topLevel) {
+    if (!DIRECT_ASK.test(msg.text) || msg.truncated) {
+      rest.push(msg);
+      continue;
+    }
+    try {
+      const { action, id } = addDirect(store, msg, clock);
+      if (action === "created" || action === "edited") taken.push(id);
+      const ts = msg.editedTs && compareTs(msg.editedTs, msg.ts) > 0 ? msg.editedTs : msg.ts;
+      if (!newest || compareTs(ts, newest) > 0) newest = ts;
+    } catch {
+      rest.push(msg); // the Claude run handles it
+    }
+  }
+  inbox.topLevel = rest;
+  // Nothing else at the top level: move the mark past them here, since no Claude run will.
+  if (newest && !rest.length) {
+    const state = store.state();
+    if (!state.checkpoints["replies:selfdm"] || compareTs(newest, state.checkpoints["replies:selfdm"]) > 0) {
+      state.checkpoints["replies:selfdm"] = newest;
+      store.saveState(state);
+    }
+  }
+  return taken;
 }
 
 // Worker news for the user that a replies run must post (dispatch.mjs sets job.notice).
@@ -257,6 +304,9 @@ export async function sweepNeeded(store, call, clock) {
   if (others.length) return { run: true, reason: `${others.join(", ")} can only be checked by Claude` };
   const since = state.checkpoints.slack;
   if (!since) return { run: true, reason: "first sweep" };
+  const delay = Number(workerConfig(store).prepDelayMin) || 0;
+  const waiting = store.allItems().filter((item) => needsPrecheck(item, now, delay)).map((item) => item.id);
+  if (waiting.length) return { run: true, reason: `pre-check before a session starts: ${waiting.join(", ")}` };
   const quietHours = config.gate?.maxQuietHours ?? 6;
   const last = state.checkpoints["sweep:last"];
   if (!last || now - Date.parse(last) >= quietHours * 3600 * 1000) {
@@ -312,7 +362,7 @@ export async function decide(mode, { home, token, fetchImpl, clock } = {}) {
     const call = slackClient(token, fetchImpl);
     if (mode === "replies") {
       const inbox = await collectInbox(store, call, clock);
-      const routed = routeInbox(store, inbox, clock);
+      const routed = [...routeInbox(store, inbox, clock), ...takeDirectAsks(store, inbox, clock)];
       const count = inboxKeys(inbox).length;
       if (count) {
         fs.mkdirSync(path.dirname(inboxFile), { recursive: true });
@@ -360,7 +410,7 @@ async function watch(home, token, { intervalSec = 60, sweepEveryMin = 30 } = {})
     try {
       const inbox = await collectInbox(store, call);
       // Card replies go straight to their sessions; dispatch starts them now.
-      if (routeInbox(store, inbox).length) tick({ home });
+      if (routeInbox(store, inbox).length + takeDirectAsks(store, inbox).length) tick({ home });
       const fresh = inboxKeys(inbox).filter((key) => !announced.has(key));
       if (fresh.length) {
         fresh.forEach((key) => announced.add(key));
