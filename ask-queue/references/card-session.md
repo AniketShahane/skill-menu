@@ -51,7 +51,8 @@ passes their new messages to you in the prompt (oldest first, `[ts] text`). An e
    - If `askType` is in `simpleTypes` (`$AQ stats`), choose `approving` unless the draft would commit
      the user.
 5. **Draft** (approving only). Write in the user's voice (style.md), tuned to the asker (people.md),
-   short, with only facts you can trace. Follow the playbook for the type when there is one.
+   short, with only facts you can trace. If a `writing` skill is installed, follow it too: medium
+   level for formal replies, loose for casual ones. Follow the playbook for the type when there is one.
 6. **Post the card** ([cards.md](cards.md)) with `slack_send_message` to `config.slack.selfDmId`, no
    `thread_ts`. Then save everything in one update: `askType`, `prep`, `questions` or `draft`, and
    `card` = `{ "channelId": <selfDmId>, "ts": <message ts>, "lastSeenTs": <message ts> }`, with
