@@ -175,6 +175,12 @@ test("gate: old self-DM cards can't be read by the bot, so a Claude run reads th
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, "tmp", "inbox.json"), "utf8")).legacy, ["AQ-1"]);
   const second = await decide("replies", { home, token: BOT_TOKEN, fetchImpl: slack.fetchImpl, clock });
   assert.equal(second.run, false, "not again until the fixed schedule is due");
+  // Closed, the old card no longer needs a Claude run.
+  const closed = freshHome();
+  const old = cardItem(closed.store, { channelId: "D_SELF", ts: "51.0", lastSeenTs: "51.0" });
+  updateItem(closed.store, old, { status: "skipped" }, clock);
+  const quiet = await decide("replies", { home: closed.home, token: BOT_TOKEN, fetchImpl: fakeSlack().fetchImpl, clock });
+  assert.equal(quiet.run, false);
   assert.ok(slack.calls.every((c) => c.params.channel !== "D_SELF"));
 });
 

@@ -165,7 +165,8 @@ export async function collectInbox(store, call, clock) {
   const watched = listItems(store, { watch: true }, clock);
   for (const item of watched) {
     if (item.card.channelId !== home) {
-      legacy.push(item.id);
+      // Closed old cards don't wake Claude: a reply there would cost a run every 15 minutes for 48h.
+      if (!["done", "skipped", "filtered"].includes(item.status)) legacy.push(item.id);
       continue;
     }
     const key = `${item.card.channelId}|${item.card.ts}`;
