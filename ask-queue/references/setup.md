@@ -28,21 +28,33 @@ connectors (Slack required; Jira, Zoom, Gmail optional) must already be connecte
    `memory/style.md` and recurring askers to `memory/people.md`. Then ask the user: "Who asks you for
    things most often, and where do the answers usually live?" and record that in people.md and
    projects.md.
-7. **Token-free gate (optional, recommended).** Without it, every scheduled run starts Claude, even
-   when nothing is new. With it, `scripts/gate.mjs` checks Slack itself and starts Claude only when
-   there is work. The user creates a Slack app for their own workspace (api.slack.com/apps, "From
-   scratch"), adds the **User Token Scope** `im:history` (not a bot scope; optionally also the legacy
-   `search:read`, which lets the gate skip quiet sweeps too), installs it (Enterprise Grid orgs may
-   need admin approval), and saves the User OAuth Token (`xoxp-…`, not the bot's `xoxb-`):
+7. **Slack bot (optional, recommended).** Without it, cards live in the self-DM and every scheduled
+   check starts Claude. With it, cards live in the bot's DM, the watcher hears the user's messages
+   there at once with no Claude run, and the 2-minute check is free when nothing is new.
+   - The user creates a Slack app for their workspace (api.slack.com/apps, "From scratch"; company
+     workspaces may need a security review and admin approval). **Bot token scopes only, exactly:**
+     `chat:write`, `im:history`, `im:read`, `users:read`. No user token scopes. Turn on **Socket
+     Mode** (make an app-level token with `connections:write`), **Event Subscriptions** with the
+     bot event `message.im`, and in **App Home** the Messages tab with "Allow users to send
+     messages". Install it.
+   - Tokens: the bot token (`xoxb-`) and the app-level token (`xapp-`). Either in files outside the
+     data directory:
 
-   ```
-   mkdir -p ~/.config/ask-queue && chmod 700 ~/.config/ask-queue
-   (umask 077; cat > ~/.config/ask-queue/slack-token)   # paste the token, then Ctrl-D
-   ```
+     ```
+     mkdir -p ~/.config/ask-queue && chmod 700 ~/.config/ask-queue
+     (umask 077; cat > ~/.config/ask-queue/slack-token)       # bot token, then Ctrl-D
+     (umask 077; cat > ~/.config/ask-queue/slack-app-token)   # app-level token, then Ctrl-D
+     ```
 
-   It must stay outside the data directory, so the guarded model can never read it. The gate calls
-   only four read methods. A single-workspace app counts as an internal app, so Slack's 2025 limits
-   for non-Marketplace apps don't apply.
+     or in AWS Secrets Manager as `<prefix>/bot-token` and `<prefix>/app-token`, with
+     `~/.config/ask-queue/aws.json` = `{"region": "us-west-2", "prefix": "<prefix>"}`. The machine's
+     role needs `secretsmanager:GetSecretValue` on those two. Once `aws.json` exists, the files are
+     not read: delete them. Check with `node <skill-dir>/scripts/slack.mjs check`.
+   - Connect: `node <skill-dir>/scripts/slack.mjs connect` posts a hello into the bot DM and saves
+     its channel id as `slack.cardChannel`. From then on new cards go there. Cards already in the
+     self-DM stay there until they close; a Claude replies run reads them every 15 minutes.
+   - With the guard off, sessions could read the tokens; the scopes above are why that is OK: the
+     bot can read and write only its own DM with the user (and look up user names).
 8. **Health check.** Run `scripts/doctor.sh`. It checks the gate token if there is one, starts a headless `claude -p`
    run the way cron will, reports which connector tools that run can see, and posts one test
    message to the self-DM.
@@ -52,10 +64,17 @@ connectors (Slack required; Jira, Zoom, Gmail optional) must already be connecte
 CRON_TZ=America/Los_Angeles
 1-59/15 8-20 * * 1-5  $HOME/.claude/skills/ask-queue/scripts/run.sh sweep
 */2 8-20 * * 1-5  $HOME/.claude/skills/ask-queue/scripts/run.sh replies
+* * * * *  $HOME/.claude/skills/ask-queue/scripts/watch.sh
 ```
 
-The gate runs first every time. With a token, a reply in a card thread reaches that card's session
-in about 2 minutes, and a quiet check costs nothing. Without one, the gate lets replies through only
+The last line only matters with the Slack bot: it starts the watcher (`watch.mjs`) and restarts it
+within a minute if it dies; while it runs, the line does nothing. The watcher hands a new bot-DM
+message to a session within seconds. Its log is `logs/watch-<date>.log`; every request it, the
+gate and `slack.mjs post` handle is one line in `logs/events.jsonl` (time, event id, channel,
+user, action, item).
+
+The gate runs first every time. With the bot, a reply in a card thread reaches that card's session
+in seconds (watcher) or about 2 minutes (gate), and a quiet check costs nothing. Without one, the gate lets replies through only
 every 15 minutes, as before. Sweeps run every 15 minutes either way (odd minutes, so they never
 clash with a replies check on the shared lock).
 
@@ -65,17 +84,13 @@ replies, work after "go". Each session is a background `claude --bg` session nam
 `AQ-n <first words of the title>` (30 characters at most), so it shows in Claude Code's agent view (`claude agents`): under "working" while a
 round runs, then under "completed" (it's stopped between rounds so it doesn't hold memory). It runs
 in its own folder under `~/.local/share/ask-queue/jobs/AQ-n/work` and is resumed there for every
-round. Background sessions only start (and only run the guard hook) in trusted folders, so the
+round. Background sessions only start in trusted folders, so the
 first run marks `jobs/` as trusted in every claude config file (`~/.claude.json`, and
 `$CLAUDE_CONFIG_DIR/.claude.json` or `~/.claude/.claude.json`): cron and the background daemon can
-read different ones. Each session has a fail-closed
-guard: edits and commands only in that folder (plus memory notes), `aq.mjs` changes only to its own
-item, Slack posts only in its card thread (plus posting the card itself once), nothing ever sent.
-Everything else that isn't a hard rule (skills, subagents, network and push commands, databricks
-writes, write tools, files elsewhere) is asked for in the card thread: react ✅ or reply *yes* and
-that kind of call is allowed for the rest of that card. Only code grants, so a Slack ✅ or *yes*
-counts only when the gate (it needs the token) reads it; without the gate, type *yes* into the
-session in Claude Code's agent view. A new ask waits `prepDelayMin` 10 minutes, then the sweep checks it
+read different ones. Sessions run with
+`bypassPermissions` and no guard hook (`guard.mjs` is off for now): nothing is blocked. The prompt
+tells them to ask in the card thread before three things: changing main, sending as you, and
+writing to production data (`$AQ config set prodProfile <profile>` names your production Databricks profile). A new ask waits `prepDelayMin` 10 minutes, then the sweep checks it
 still needs a session: if you replied or reacted 👀, another card has it, or one of your own Claude
 sessions is on it, no session starts. Unchecked after `precheckWaitMin` 45 more minutes, it starts anyway.
 Start a self-DM message with "Claude," to ask directly: the answer comes in that message's thread.
@@ -88,16 +103,22 @@ it until changed; the card shows its model on a 🧠 line. A card session reacts
 card-thread messages when it reads them. A closed
 card keeps its session for 48 hours.
 
-Repo edits: `$AQ config set repoEdit.roots '["/path/to/repo"]'` lets card sessions read and search
-those folders (secrets like `.env` and `credentials*` stay closed) and edit a file there once you
-allow it. Name the path in a card reply or type it into the session to allow it. Or describe the file
-loosely: the session finds it, asks "OK to edit …?", and your yes allows it. Sessions never commit
-there. Empty (the default): sessions edit only their job folder. Code work uses a git worktree at `jobs/AQ-n/work/repo` on a
-local branch `aq/AQ-n-…`; when you're done with it, push the branch yourself and remove the
-worktree with `git worktree remove`.
+Repos: `$AQ config set repoEdit.roots '["/path/to/repo"]'`. Every card then gets its own git
+worktree of the first root at `jobs/AQ-n/work/repo`, on a local branch `aq/AQ-n-…`. Before the
+worktree is made, the repo as it is (committed, changed and new files; `.gitignore`d files, secrets
+and new files over 20 MB left out) is saved as one commit on top of the rolling `aq-backup` branch
+and pushed to origin. Main, the index and your files are not touched, and nothing changed means no
+new commit. The worktree starts from that snapshot, so `git diff <job.base> aq/AQ-n-…` shows only
+the session's changes. Bring them to main yourself, then `git worktree remove` and delete the branch.
 
 Runs never overlap (the second one exits when the first holds the lock). Skipped checks log one line. Logs:
-`~/.local/share/ask-queue/logs/`. The guard's allow/deny decisions: `logs/guard.log`.
+`~/.local/share/ask-queue/logs/`.
+
+Retention: stored messages are kept 90 days. Once a day the tick deletes closed items (done,
+skipped, filtered) that closed more than 90 days ago, with their job folder, worktree and artifacts,
+plus ledger lines, `events.jsonl` lines, logs and tmp files older than that. Git branches stay.
+Run it by hand with `node <skill-dir>/scripts/dispatch.mjs purge`. Claude Code deletes its own
+session transcripts after `cleanupPeriodDays` (30 by default).
 
 ## If the health check fails
 
@@ -106,13 +127,13 @@ read-only. If `doctor.sh` shows missing Slack tools or the test message fails:
 
 1. Update Claude Code and re-run `doctor.sh`.
 2. If it still fails, run the queue inside one long-lived interactive session instead of cron, with
-   the same guard (interactive sessions load claude.ai connectors). With a gate token, prefer
+   the same settings (interactive sessions load claude.ai connectors). With a gate token, prefer
    `> watch my queue`: a Monitor runs `gate.mjs watch` and wakes Claude only on new messages or asks.
    Without one, use `/loop`:
 
 ```
 tmux new -s ask-queue
-claude --permission-mode dontAsk --settings ~/.local/share/ask-queue/tmp/headless-settings.json
+claude --permission-mode bypassPermissions --settings ~/.local/share/ask-queue/tmp/headless-settings.json
 > /loop 15m use ask-queue in replies mode (unattended: never ask in chat)
 > /loop 2h use ask-queue in sweep mode (unattended: never ask in chat)
 ```

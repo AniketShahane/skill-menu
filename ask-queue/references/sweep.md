@@ -94,9 +94,9 @@ starts anyway after `workers.precheckWaitMin` (45) more minutes.
 
 ## 6. The filtered digest
 
-If any items were created as `filtered` this sweep, post ONE digest message to
-`config.slack.selfDmId` (cards.md) and set each filtered item's `card` to
-`{ "channelId": selfDmId, "ts": <digest ts>, "lastSeenTs": <digest ts> }`. Post nothing else: cards
+If any items were created as `filtered` this sweep, post ONE digest message, top level, in the
+card channel (cards.md "Where to post") and set each filtered item's `card` to
+`{ "channelId": <channel>, "ts": <digest ts>, "lastSeenTs": <digest ts> }`. Post nothing else: cards
 for new asks come from their card sessions.
 
 ## 7. Finish

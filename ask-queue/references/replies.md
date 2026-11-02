@@ -3,7 +3,7 @@
 Card replies are answered by each card's own session ([card-session.md](card-session.md)), not here.
 Getting them there is: with an inbox file, `scripts/gate.mjs` already passed them on. **Without one,
 you must read every watched thread yourself** (step 1) and pass card replies on with `$AQ route`:
-skip that and the user's replies are never answered. This run also handles what belongs to no single card: top-level messages in the self-DM, replies under
+skip that and the user's replies are never answered. This run also handles what belongs to no single card: top-level messages in the card channel (cards.md "Where to post"), replies under
 them, the shared filtered digest, promotion offers, and session notices. Then learn
 ([learn.md](learn.md)). The user writes plain language, never commands: work out what they mean.
 
@@ -13,7 +13,9 @@ them, the shared filtered digest, promotion offers, and session notices. Then le
 wrote it just before this run with only the user's unhandled messages: `cards[]` (only shared
 digest threads, with the item `ids` in each), `proposals[]` (answers to promotion offers),
 `topLevel[]`, `noteThreads[]` (the user's replies under their own top-level messages, e.g. "no,
-that was just a note"), and `notices[]` (news from card sessions). A message with `editedTs` was
+that was just a note"), `notices[]` (news from card sessions), and `legacy[]`: item ids (and
+`proposal:<type>`) whose threads are still in the old self-DM, which the bot can't read. For those,
+do step 2 and 3 below yourself, for just those threads. A message with `editedTs` was
 edited after you last saw it: act on the new text. A message with `truncated` is longer than the
 inbox holds: read it in full from Slack before acting. Don't re-read those threads unless a message
 refers to something you need to see.
@@ -31,8 +33,9 @@ Otherwise (no gate token), find them yourself:
    within about 2 minutes.
 3. Promotion offers: for each `openProposals` entry in `$AQ stats`, read its thread (`ts`) the same
    way; any message without 🤖 is the answer.
-4. Top level: `slack_read_channel` on `config.slack.selfDmId` with `oldest` = checkpoint
-   `replies:selfdm` (no checkpoint: last hour). Consider only top-level messages without 🤖.
+4. Top level: `slack_read_channel` on the card channel with `oldest` = checkpoint
+   `replies:cards` in the bot DM, `replies:selfdm` in the self-DM (no checkpoint: last hour).
+   Consider only top-level messages without 🤖 and not from the bot.
 5. Note threads: for the user's top-level messages from the last 48 hours that have replies, read
    the thread; new are user messages without 🤖 after checkpoint `note:<parent ts>` (none: all).
    Skip a message that is an item's `card.ts` (a direct ask): its thread is a card thread, step 2.
@@ -58,7 +61,7 @@ There are no commands. Decide what each message is for:
 
 | The message is | Example | Do |
 |---|---|---|
-| a direct ask: it opens with "Claude," or "Claude:" | "Claude, which amendments went live in Sep?" | Write `{"ts": …, "text": …, "editedTs": …}` to `tmp/direct-<ts>.json` and run `$AQ direct --file tmp/direct-<ts>.json`. That message becomes the card: its own session reacts 👀, does the task and answers in its thread. Post nothing yourself. (With a gate token the gate does this before you run, so you won't see these.) |
+| a direct ask: any top-level message in the bot DM; in the self-DM, one that opens with "Claude," or "Claude:" | "Claude, which amendments went live in Sep?" | Write `{"ts": …, "text": …, "editedTs": …}` to `tmp/direct-<ts>.json` and run `$AQ direct --file tmp/direct-<ts>.json`. That message becomes the card: its own session reacts 👀, does the task and answers in its thread. Post nothing yourself. (With a gate token the gate does this before you run, so you won't see these.) |
 | about an existing card | "the Sam one: say Friday", "AQ-12 yes" | Pass it to that card's session: `$AQ route AQ-n --file` (no `seenTs`). Reply in this message's thread: `🤖 Passed to AQ-12.` |
 | something to do | "draft a reply to Lee's email about the offsite", "pull Q3 churn by region into a doc" | New item (`$AQ add`, status `new`): `source.kind` `manual`, fingerprint `manual:{ts}`, `who` = the user. Its card session preps it and posts the card. Reply: `🤖 Took this as a new ask (AQ-21).` |
 | a fact to remember | "Priya likes bullet points" | Memory, tagged `(note, <date>)`. Reply in its thread: `🤖 Noted in people.md.` |

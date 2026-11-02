@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Token-free pre-check: decides whether a Claude run is needed, using plain Slack Web API reads.
-// Optional. Needs a read-only Slack user token (scope im:history; add the legacy search:read to
-// also gate sweeps, else sweeps keep the fixed schedule) in
-// $ASK_QUEUE_SLACK_TOKEN or ~/.config/ask-queue/slack-token. That file sits outside the data dir,
-// so the guarded model can't read it. Without a token, runs fall back to the fixed schedule.
+// Optional. Uses the ask-queue bot's token (slack.mjs loadToken: env, AWS Secrets Manager or
+// ~/.config/ask-queue/slack-token). With bot scope im:history it reads the bot's DM with the user,
+// where cards live (config slack.cardChannel). A bot token can't search, so sweeps keep the fixed
+// schedule; cards still in the old self-DM are read by a Claude run on the fixed schedule too.
+// Without a token, runs fall back to the fixed schedule.
 //
 //   gate.mjs replies   routes card-thread replies to their card sessions (no Claude run), then
 //                      exit 0 = run Claude for the rest (writes tmp/inbox.json), exit 10 = nothing left
@@ -13,7 +14,6 @@
 //   gate.mjs watch     loop for Claude Code's Monitor tool: one stdout line per new event
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -29,6 +29,9 @@ import {
   workerConfig,
 } from "./aq.mjs";
 import { tick } from "./dispatch.mjs";
+import { botDm, cardChannel, loadToken, logEvent } from "./slack.mjs";
+
+export { loadToken };
 
 export const EXIT_RUN = 0;
 export const EXIT_SKIP = 10;
@@ -44,20 +47,16 @@ const MAX_TEXT = 20_000;
 // Edits and note threads are looked for this far back.
 const LOOKBACK_SEC = 48 * 3600;
 
-export function loadToken(env = process.env) {
-  if (env.ASK_QUEUE_SLACK_TOKEN) return env.ASK_QUEUE_SLACK_TOKEN.trim();
-  const dir = path.join(env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "ask-queue");
-  try {
-    return fs.readFileSync(path.join(dir, "slack-token"), "utf8").trim() || null;
-  } catch {
-    return null;
-  }
+// The checkpoint for new top-level messages where cards live.
+export function topCheckpoint(config) {
+  const ch = cardChannel(config);
+  return ch && ch !== config?.slack?.selfDmId ? "replies:cards" : "replies:selfdm";
 }
 
 // Errors never include the token or request headers: they end up in model-readable logs.
 export function slackClient(token, fetchImpl = fetch) {
   const valid = /^xox[a-z]-[A-Za-z0-9-]+$/.test(String(token || ""));
-  return async function call(method, params = {}) {
+  const call = async function call(method, params = {}) {
     if (!READ_METHODS.has(method)) throw new Error(`${method} is not an allowed read method`);
     if (!valid) throw new Error("Slack token is malformed (expected one line starting with xoxp-)");
     const url = new URL(`https://slack.com/api/${method}`);
@@ -84,6 +83,8 @@ export function slackClient(token, fetchImpl = fetch) {
     if (method === "auth.test") body.scopes = res.headers?.get?.("x-oauth-scopes") || null;
     return body;
   };
+  call.isBot = /^xoxb-/.test(String(token || ""));
+  return call;
 }
 
 async function paged(call, method, params) {
@@ -100,6 +101,8 @@ async function paged(call, method, params) {
 
 // Slack stores the posted 🤖 as the shortcode ":robot_face:", so accept both.
 const fromBot = (text) => /^(🤖|:robot_face:)/u.test(String(text || "").trimStart());
+// The user's own message: never the bot's (bot_id), never a 🤖 post. Loop protection.
+const byUser = (m, userId) => m.user === userId && !m.bot_id && !m.subtype?.startsWith?.("bot") && !fromBot(m.text);
 
 function isNew(msg, mark) {
   if (compareTs(msg.ts, mark) > 0) return true;
@@ -135,7 +138,7 @@ function proposedSince(item) {
 export function reactionAnswer(messages, userId, since) {
   let answer = null;
   for (const m of messages) {
-    if (!fromBot(m.text) || Number(m.ts) < since) continue;
+    if (!(fromBot(m.text) || m.bot_id) || Number(m.ts) < since) continue;
     const mine = (names) => (m.reactions || []).some((r) => names.has(r.name) && (r.users || []).includes(userId));
     if (mine(NO_REACTIONS)) answer = { ts: m.ts, text: "no (❌ on your OK request)", reaction: true };
     else if (mine(YES_REACTIONS)) answer = { ts: m.ts, text: "yes (✅ on your OK request)", reaction: true };
@@ -147,15 +150,24 @@ async function threadMessages(call, channel, ts) {
   return (await paged(call, "conversations.replies", { channel, ts, limit: 200 })).filter((m) => m.ts !== ts);
 }
 
-// Collects only the user's messages that no run has handled yet.
+// Collects only the user's messages that no run has handled yet, from the channel where cards live
+// (the bot DM). Card threads elsewhere (the old self-DM, which a bot can't read) are listed in
+// `legacy` for a Claude run on the fixed schedule.
 export async function collectInbox(store, call, clock) {
-  const { userId, selfDmId } = store.config().slack || {};
+  const config = store.config();
+  const { userId } = config.slack || {};
+  const home = cardChannel(config);
   const checkpoints = store.state().checkpoints;
-  const mine = (m) => m.user === userId && !fromBot(m.text);
+  const mine = (m) => byUser(m, userId);
+  const legacy = [];
 
   const threads = new Map();
   const watched = listItems(store, { watch: true }, clock);
   for (const item of watched) {
+    if (item.card.channelId !== home) {
+      legacy.push(item.id);
+      continue;
+    }
     const key = `${item.card.channelId}|${item.card.ts}`;
     const thread = threads.get(key) || { channelId: item.card.channelId, cardTs: item.card.ts, ids: [], lastSeen: null };
     thread.ids.push(item.id);
@@ -177,7 +189,16 @@ export async function collectInbox(store, call, clock) {
 
   const proposals = [];
   for (const { type, ts } of computeStats(store, clock).openProposals) {
-    const messages = (await threadMessages(call, selfDmId, ts)).filter(mine).map(compact);
+    let thread;
+    try {
+      thread = await threadMessages(call, home, ts);
+    } catch (err) {
+      // An offer posted before cards moved to the bot DM: the Claude run reads it.
+      if (!/thread_not_found|channel_not_found/.test(err.message)) throw err;
+      legacy.push(`proposal:${type}`);
+      continue;
+    }
+    const messages = thread.filter(mine).map(compact);
     if (messages.length) proposals.push({ type, ts, messages });
   }
 
@@ -185,10 +206,10 @@ export async function collectInbox(store, call, clock) {
   // edits to recent ones, and replies under them.
   const now = clock ? clock() : new Date();
   const nowSec = now.getTime() / 1000;
-  const since = checkpoints["replies:selfdm"] || (nowSec - 3600).toFixed(6);
+  const since = checkpoints[topCheckpoint(config)] || (nowSec - 3600).toFixed(6);
   const lookback = (nowSec - LOOKBACK_SEC).toFixed(6);
   const windowStart = compareTs(since, lookback) < 0 ? since : lookback;
-  const parents = (await paged(call, "conversations.history", { channel: selfDmId, oldest: windowStart, limit: 200 }))
+  const parents = (await paged(call, "conversations.history", { channel: home, oldest: windowStart, limit: 200 }))
     .filter((m) => (!m.thread_ts || m.thread_ts === m.ts) && mine(m))
     .sort((a, b) => compareTs(a.ts, b.ts));
   const topLevel = parents.filter((m) => isNew(m, since)).map(compact);
@@ -196,29 +217,32 @@ export async function collectInbox(store, call, clock) {
   // Replies under the user's own top-level messages ("no, that was just a note"). Each thread has its
   // own mark (checkpoint note:<parentTs>), so a reply landing mid-check can't be skipped.
   // A direct ask's thread is its card's, read above: not a note thread.
-  const cardTs = new Set(watched.filter((item) => item.card.channelId === selfDmId).map((item) => item.card.ts));
+  const cardTs = new Set(watched.filter((item) => item.card.channelId === home).map((item) => item.card.ts));
   const noteThreads = [];
   for (const parent of parents) {
     if (cardTs.has(parent.ts)) continue;
     const mark = checkpoints[`note:${parent.ts}`] || parent.ts;
     if (!parent.latest_reply || compareTs(parent.latest_reply, mark) <= 0) continue;
-    const messages = (await threadMessages(call, selfDmId, parent.ts))
+    const messages = (await threadMessages(call, home, parent.ts))
       .filter((m) => mine(m) && compareTs(m.ts, mark) > 0)
       .map(compact);
     if (messages.length) noteThreads.push({ parentTs: parent.ts, parentText: compact(parent).text, messages });
   }
 
-  return { createdAt: now.toISOString(), cards, proposals, topLevel, noteThreads, notices: workerNotices(store) };
+  return { createdAt: now.toISOString(), channel: home, cards, proposals, topLevel, noteThreads, notices: workerNotices(store), legacy };
 }
 
-// "Claude, …" messages at the top of the self-DM become their own cards here, with no Claude run:
-// dispatch starts the session, which answers in the message's thread. Returns the item ids.
+// Direct asks become their own cards here, with no Claude run: dispatch starts the session, which
+// answers in the message's thread. In the bot DM every top-level message is one; in the old self-DM
+// only "Claude, …" messages are. Returns the item ids.
 export function takeDirectAsks(store, inbox, clock) {
+  const config = store.config();
+  const anyText = botDm(config, inbox.channel || cardChannel(config));
   const taken = [];
   const rest = [];
   let newest = null;
   for (const msg of inbox.topLevel) {
-    if (!DIRECT_ASK.test(msg.text) || msg.truncated) {
+    if ((!anyText && !DIRECT_ASK.test(msg.text)) || msg.truncated) {
       rest.push(msg);
       continue;
     }
@@ -235,8 +259,9 @@ export function takeDirectAsks(store, inbox, clock) {
   // Nothing else at the top level: move the mark past them here, since no Claude run will.
   if (newest && !rest.length) {
     const state = store.state();
-    if (!state.checkpoints["replies:selfdm"] || compareTs(newest, state.checkpoints["replies:selfdm"]) > 0) {
-      state.checkpoints["replies:selfdm"] = newest;
+    const key = topCheckpoint(config);
+    if (!state.checkpoints[key] || compareTs(newest, state.checkpoints[key]) > 0) {
+      state.checkpoints[key] = newest;
       store.saveState(state);
     }
   }
@@ -292,6 +317,11 @@ export function inboxKeys(inbox) {
   ];
 }
 
+// Card threads the gate can't read (old self-DM cards) need a Claude run, on the fixed schedule.
+function legacyDue(home, inbox, now) {
+  return (inbox.legacy || []).length > 0 && fallbackDue(home, "replies", now);
+}
+
 const dayBefore = (iso) => new Date(Date.parse(iso) - 24 * 3600 * 1000).toISOString().slice(0, 10);
 
 export async function sweepNeeded(store, call, clock) {
@@ -314,6 +344,9 @@ export async function sweepNeeded(store, call, clock) {
   }
 
   // One hit is enough to decide, so a single page per query is fine here.
+  if (call.isBot) {
+    throw new Error("a bot token can't search Slack");
+  }
   const { userId, selfDmId } = config.slack;
   const sinceEpoch = Date.parse(since) / 1000;
   const hits = new Set();
@@ -362,16 +395,23 @@ export async function decide(mode, { home, token, fetchImpl, clock } = {}) {
     const call = slackClient(token, fetchImpl);
     if (mode === "replies") {
       const inbox = await collectInbox(store, call, clock);
-      const routed = [...routeInbox(store, inbox, clock), ...takeDirectAsks(store, inbox, clock)];
+      const routedIds = routeInbox(store, inbox, clock);
+      const directIds = takeDirectAsks(store, inbox, clock);
+      const routed = [...routedIds, ...directIds];
+      for (const id of routedIds) logEvent(home, { source: "gate", action: "route", channel: inbox.channel, user: store.config().slack?.userId, id }, clock);
+      for (const id of directIds) logEvent(home, { source: "gate", action: "direct", channel: inbox.channel, user: store.config().slack?.userId, id }, clock);
       const count = inboxKeys(inbox).length;
-      if (count) {
+      const legacy = count ? false : legacyDue(home, inbox, now);
+      if (count || legacy) {
         fs.mkdirSync(path.dirname(inboxFile), { recursive: true });
         fs.writeFileSync(inboxFile, `${JSON.stringify(inbox, null, 2)}\n`);
       }
       const sent = routed.length ? `; passed to card sessions: ${routed.join(", ")}` : "";
       result = count
         ? { run: true, reason: `${count} new messages${sent}`, inbox: "tmp/inbox.json", routed }
-        : { run: false, reason: `nothing for the replies run${sent}`, routed };
+        : legacy
+          ? { run: true, reason: `${inbox.legacy.length} cards in the old self-DM to read${sent}`, inbox: "tmp/inbox.json", routed }
+          : { run: false, reason: `nothing for the replies run${sent}`, routed };
     } else {
       result = await sweepNeeded(store, call, clock);
     }
@@ -455,7 +495,11 @@ if (isMain) {
       const me = await slackClient(token)("auth.test");
       const expected = createStore(home).config().slack?.userId;
       process.stdout.write(`gate: token OK for ${me.user} (${me.user_id}) on ${me.team}; scopes: ${me.scopes || "unknown"}\n`);
-      if (expected && expected !== me.user_id) {
+      if (me.bot_id) {
+        if (/search:read|chat:write\.customize|im:write|channels:history|groups:history/.test(me.scopes || "")) {
+          process.stdout.write("gate: WARN the bot has more scopes than the approved four (im:history, im:read, users:read, chat:write)\n");
+        }
+      } else if (expected && expected !== me.user_id) {
         process.stdout.write(`gate: FAIL token belongs to ${me.user_id}, but slack.userId is ${expected}\n`);
         process.exit(1);
       }

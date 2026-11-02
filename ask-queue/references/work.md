@@ -82,16 +82,16 @@ arrives when the run ends.
 Nobody answers in your chat. The user talks to you only through the card thread, and their words
 arrive in your prompt on resume.
 
-1. **Stay inside the job folder** you were given (your working directory). Edits and commands
-   outside it, network commands, installs, `git push`, `gh`/`glab`, databricks writes, skills and
-   subagents need the user's OK first: card-session.md "Asking for an OK". Repo files go through
-   card-session.md "Editing repo files". Any other denial is final: don't look for another route;
-   work around it or report it.
-2. **Code work:** the repo is a git worktree at `repo/` in your job folder, on a new local branch.
-   Commit as you go with plain messages. Never push; the user pushes.
+1. **Work in your job folder and your worktree.** No permission checks; scratch work goes in the
+   job folder. Changing main, sending as the user and writing to production data need a yes first
+   (card-session.md "Three things need a yes").
+2. **Code work:** the repo is a git worktree at `repo/` in your job folder, on a new local branch
+   started from the latest `aq-backup` snapshot. Commit as you go with plain messages. Never push;
+   the user brings it to main.
 3. **Docs:** Drive `create_file` (no parent folder) for a private Google Doc titled `[Draft] …`.
-4. **Post only in your card thread** (`slack_send_message` with `channel_id` and `thread_ts`
-   from the prompt), each message starting with `🤖` and naming `AQ-n` (cards.md). Keep it to:
+4. **Post only in your card thread** (the way your prompt says: `slack.mjs post --thread` in the
+   bot DM, else `slack_send_message` with `channel_id` and `thread_ts`), each message starting
+   with `🤖` and naming `AQ-n` (cards.md "Where to post"). Keep it to:
    - `🤖 🟣 **AQ-n · Started:** <one line plan>` (first work run only),
    - at most one progress line on long work,
    - the result (below), or a question.

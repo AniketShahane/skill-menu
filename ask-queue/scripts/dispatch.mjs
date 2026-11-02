@@ -5,13 +5,14 @@
 //   dispatch.mjs tick        clean up dead workers, start `ready` items up to workers.max
 //   dispatch.mjs exec AQ-n   internal: supervise one worker run (tick spawns it detached)
 //   dispatch.mjs status      running and queued work (same as aq.mjs jobs)
+//   dispatch.mjs purge [days] delete what closed more than 90 days ago (tick also runs it once a day)
 //
 // Every card has one Claude session for its whole life: the first run preps the ask
 // and posts the card; every reply in the card thread, and the work after "go", resumes it (--resume).
 // A session is a background `claude --bg` named "AQ-n · <title>" (so it shows in Claude Code's agent
-// view), with the fail-closed worker guard (guard.mjs --worker), always started in
-// <home>/jobs/AQ-n/work (resume needs the same folder). Code work gets a git worktree on branch
-// aq/AQ-n-… at work/repo. Card runs (kind card) and work runs (kind work) have separate limits.
+// view), with no permission checks (bypassPermissions; guard.mjs is off for now), always started in
+// <home>/jobs/AQ-n/work (resume needs the same folder). Every card gets a git worktree on branch
+// aq/AQ-n-…, started from an aq-backup snapshot, at work/repo. Card runs (kind card) and work runs (kind work) have separate limits.
 
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -121,16 +122,72 @@ function slug(text) {
     .slice(0, 30) || "work";
 }
 
+// The permission mode sessions start with; a session saved with another one restarts with this.
+const BG_MODE = "bypassPermissions";
+export const BACKUP_BRANCH = "aq-backup";
+// Kept out of backups, whatever .gitignore says: secrets, and new files too big for a git push.
+const BACKUP_EXCLUDES = ["**/.env", "**/.env.*", "**/*.env", "**/.databricks-*", "**/credentials*", "**/*.credentials", "**/*.pem", "**/*.key"].map(
+  (glob) => `:(exclude,glob)${glob}`,
+);
+const BACKUP_MAX_NEW_FILE = 20 * 1024 * 1024;
+
+// Saves the repo as it is right now (committed, changed and new files) as one commit on top of the
+// rolling aq-backup branch, then pushes that branch to origin. Main, the index and the working tree
+// are never touched. Nothing changed since the last snapshot: no new commit. A failed push is only
+// logged: the next snapshot's push carries this one too. Returns the snapshot commit.
+export function snapshotRepo(repo, label) {
+  const git = (args, env = {}) =>
+    execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: "pipe", env: { ...process.env, ...env } }).trim();
+  const gitDir = git(["rev-parse", "--absolute-git-dir"]);
+  const index = path.join(gitDir, `aq-backup-${process.pid}.index`);
+  let tree;
+  try {
+    // Starting from the real index makes `add` fast (unchanged files aren't re-read).
+    if (fs.existsSync(path.join(gitDir, "index"))) fs.copyFileSync(path.join(gitDir, "index"), index);
+    const big = git(["ls-files", "--others", "--exclude-standard", "-z"])
+      .split("\0")
+      .filter((file) => file && fs.statSync(path.join(repo, file), { throwIfNoEntry: false })?.size > BACKUP_MAX_NEW_FILE)
+      .map((file) => `:(exclude,literal)${file}`);
+    git(["add", "-A", "--", ".", ...BACKUP_EXCLUDES, ...big], { GIT_INDEX_FILE: index });
+    tree = git(["write-tree"], { GIT_INDEX_FILE: index });
+  } finally {
+    fs.rmSync(index, { force: true });
+  }
+  let previous = null;
+  try {
+    previous = git(["rev-parse", "--verify", "--quiet", `refs/heads/${BACKUP_BRANCH}`]);
+  } catch {}
+  const parent = previous || git(["rev-parse", "HEAD"]);
+  let sha = parent;
+  if (git(["rev-parse", `${parent}^{tree}`]) !== tree) {
+    sha = git(["-c", "user.name=ask-queue backup", "-c", "user.email=ask-queue@localhost", "commit-tree", tree, "-p", parent, "-m", `aq-backup: ${new Date().toISOString()} before ${label}`]);
+  }
+  // Compare-and-swap, so two snapshots at once can't drop one.
+  git(["update-ref", `refs/heads/${BACKUP_BRANCH}`, sha, ...(previous ? [previous] : [])]);
+  let pushed = true;
+  try {
+    execFileSync("git", ["-C", repo, "push", "--quiet", "origin", `refs/heads/${BACKUP_BRANCH}:refs/heads/${BACKUP_BRANCH}`], {
+      stdio: "pipe",
+      timeout: 60_000,
+    });
+  } catch {
+    pushed = false;
+  }
+  return { sha, pushed };
+}
+
 // Job folder + workspace. The session always runs in work/ (resume finds sessions by folder).
-// A repo gets a worktree at work/repo on a new local branch; nothing is ever pushed.
-export function prepareWorkspace(home, item) {
+// Every card gets a worktree of the repo (job.repo, else the first repoEdit root) at work/repo, on
+// a new local branch started from a fresh aq-backup snapshot; only aq-backup is ever pushed.
+export function prepareWorkspace(home, item, config = {}) {
   const jobDir = path.join(home, "jobs", item.id);
   const workDir = path.join(jobDir, "work");
   fs.mkdirSync(workDir, { recursive: true });
   const job = { dir: jobDir, workDir };
   const repoDir = path.join(workDir, "repo");
-  if (item.job.repo && !fs.existsSync(repoDir)) {
-    const repo = path.resolve(item.job.repo);
+  const source = item.job.repo || repoRoots(config)[0];
+  if (source && !fs.existsSync(repoDir)) {
+    const repo = path.resolve(source);
     const branch = `aq/${item.id}-${slug(item.title)}`;
     const git = (...args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: "pipe" });
     git("rev-parse", "--git-dir");
@@ -141,7 +198,13 @@ export function prepareWorkspace(home, item) {
       exists = false;
     }
     if (exists) git("worktree", "add", repoDir, branch);
-    else git("worktree", "add", "-b", branch, repoDir, item.job.base || "HEAD");
+    else {
+      const backup = snapshotRepo(repo, item.id);
+      git("worktree", "add", "-b", branch, repoDir, item.job.base || backup.sha);
+      job.base = item.job.base || backup.sha;
+      job.backupPushed = backup.pushed;
+    }
+    job.repo = repo;
     job.branch = branch;
     job.repoDir = repoDir;
   }
@@ -189,6 +252,86 @@ function queuePreps(store, now, config = {}) {
   return queued;
 }
 
+// Stored Slack and email text is kept 90 days. Once a day: closed items (done, skipped, filtered)
+// older than that lose their item file, job folder (prompts, logs, scratch), worktree and artifacts;
+// ledger lines, logs/events.jsonl lines, dated logs and tmp files older than that go too. The git
+// branch aq/AQ-n-… stays: it is code, not messages. Item ids are never reused (state.nextId).
+export const RETENTION_DAYS = 90;
+const CLOSED = ["done", "skipped", "filtered"];
+
+function pruneJsonl(file, cutoff) {
+  if (!fs.existsSync(file)) return 0;
+  const lines = fs.readFileSync(file, "utf8").split("\n").filter((line) => line.trim());
+  const keep = lines.filter((line) => {
+    try {
+      const at = Date.parse(JSON.parse(line).at);
+      return !Number.isFinite(at) || at >= cutoff;
+    } catch {
+      return true;
+    }
+  });
+  if (keep.length === lines.length) return 0;
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, keep.map((line) => `${line}\n`).join(""));
+  fs.renameSync(tmp, file);
+  return lines.length - keep.length;
+}
+
+function pruneFiles(dir, cutoff, match = () => true) {
+  if (!fs.existsSync(dir)) return 0;
+  let removed = 0;
+  for (const name of fs.readdirSync(dir)) {
+    const file = path.join(dir, name);
+    const stat = fs.statSync(file);
+    if (!stat.isFile() || !match(name) || stat.mtimeMs >= cutoff) continue;
+    fs.rmSync(file, { force: true });
+    removed += 1;
+  }
+  return removed;
+}
+
+export function purgeOld(store, now, { days = RETENTION_DAYS, force = false } = {}) {
+  const home = store.paths.home;
+  const state = store.state();
+  const day = today(now);
+  if (!force && state.checkpoints["purge:last"] === day) return null;
+  const cutoff = now.getTime() - days * 24 * 3600 * 1000;
+  const result = { items: [], ledger: 0, events: 0, logs: 0, tmp: 0 };
+  for (const item of store.allItems()) {
+    if (!CLOSED.includes(item.status)) continue;
+    if (Date.parse(enteredStatusAt(item)) >= cutoff) continue;
+    const job = item.job || {};
+    if (job.repo && job.repoDir && fs.existsSync(job.repoDir)) {
+      try {
+        execFileSync("git", ["-C", job.repo, "worktree", "remove", "--force", job.repoDir], { stdio: "pipe" });
+      } catch {
+        // removed with the folder below; prune drops git's record of it
+      }
+    }
+    fs.rmSync(path.join(home, "jobs", item.id), { recursive: true, force: true });
+    fs.rmSync(path.join(home, "artifacts", item.id), { recursive: true, force: true });
+    fs.rmSync(settingsFile(home, item.id), { force: true });
+    fs.rmSync(cardPostMarker(home, item.id), { force: true });
+    fs.rmSync(path.join(store.paths.items, `${item.id}.json`), { force: true });
+    if (job.repo) {
+      try {
+        execFileSync("git", ["-C", job.repo, "worktree", "prune"], { stdio: "pipe" });
+      } catch {
+        // not a repo any more
+      }
+    }
+    result.items.push(item.id);
+  }
+  result.ledger = pruneJsonl(store.paths.ledger, cutoff);
+  result.events = pruneJsonl(path.join(home, "logs", "events.jsonl"), cutoff);
+  result.logs = pruneFiles(path.join(home, "logs"), cutoff, (name) => /\.(log|txt)$/.test(name));
+  result.tmp = pruneFiles(path.join(home, "tmp"), cutoff);
+  const fresh = store.state();
+  fresh.checkpoints["purge:last"] = day;
+  store.saveState(fresh);
+  return result;
+}
+
 // Closed cards keep their session for 48 hours (follow-ups resume it). After that, a reopened card
 // starts a fresh session.
 function expireSessions(store, now) {
@@ -220,6 +363,12 @@ export function tick({ home = resolveHome(), clock, spawnSupervisor = defaultSpa
       result.reaped.push(item.id);
     }
     result.expired = expireSessions(store, now);
+    try {
+      const purged = purgeOld(store, now);
+      if (purged && (purged.items.length || purged.ledger || purged.events || purged.logs || purged.tmp)) result.purged = purged;
+    } catch (err) {
+      result.purgeError = err.message;
+    }
     result.prepQueued = queuePreps(store, now, config);
 
     let running = store.allItems().filter((i) => i.status === "working").length;
@@ -238,7 +387,7 @@ export function tick({ home = resolveHome(), clock, spawnSupervisor = defaultSpa
         continue;
       }
       try {
-        const workspace = prepareWorkspace(home, item);
+        const workspace = prepareWorkspace(home, item, store.config());
         patchJob(
           store,
           id,
@@ -270,25 +419,36 @@ function defaultSpawn(home, id) {
   child.unref();
 }
 
+// config.prodProfile names the production Databricks profile (any string); the prompt says it.
+const prodLine = (config) => (config.prodProfile ? `Databricks profile ${config.prodProfile}` : "production Databricks or any production warehouse");
+
 export function workerPrompt(home, item, config, model = "the default model") {
   const aq = path.join(SKILL_DIR, "scripts", "aq.mjs");
   const job = item.job;
   const selfDm = config.slack?.selfDmId;
   const head = `You are the ask-queue card session for ${item.id}: "${item.title}". This is unattended: nobody answers in this chat. The user talks to you only through the card thread.
 This run uses ${model}: say so on the card (cards.md). If the user's new messages switch the model, confirm it in one short line.`;
-  const post = item.card?.ts
-    ? `Card thread for every message (post only there, each starting with "🤖" and naming ${item.id}, formatted per references/cards.md): channel ${item.card.channelId}, thread_ts ${item.card.ts}`
-    : `No card yet: post the card as ONE top-level message to channel ${selfDm} (no thread_ts), then record it with update (card.channelId, card.ts, card.lastSeenTs). After that, post only in its thread.`;
-  const roots = repoRoots(config);
-  const allowed = job.repoWrites?.length ? job.repoWrites.join(", ") : "none yet";
-  const repo = roots.length
-    ? `\nRepo files under ${roots.join(", ")}: read and search freely. Edit one only once the user allowed it (allowed now: ${allowed}); to ask, follow references/card-session.md "Editing repo files".`
+  const bot = config.slack?.cardChannel;
+  const slackCli = `node ${path.join(SKILL_DIR, "scripts", "slack.mjs")}`;
+  let post;
+  if (item.card?.ts && bot && item.card.channelId === bot) {
+    post = `Card thread for every message (post only there, each starting with "🤖" and naming ${item.id}, formatted per references/cards.md): channel ${item.card.channelId}, thread_ts ${item.card.ts}. Post as the bot: write the text to a file, then \`${slackCli} post --thread ${item.card.ts} --file <file.md>\` (never slack_send_message in this DM). Read the thread and react 👀 with the Slack tools as usual.`;
+  } else if (item.card?.ts) {
+    post = `Card thread for every message (post only there, each starting with "🤖" and naming ${item.id}, formatted per references/cards.md): channel ${item.card.channelId}, thread_ts ${item.card.ts}`;
+  } else if (bot) {
+    post = `No card yet: write the card to a file and post it as ONE top-level message as the bot: \`${slackCli} post --file <card.md>\` (no --thread). It prints {"channel","ts"}: record them with update (card.channelId, card.ts, card.lastSeenTs). After that, post only in its thread (--thread <ts>).`;
+  } else {
+    post = `No card yet: post the card as ONE top-level message to channel ${selfDm} (no thread_ts), then record it with update (card.channelId, card.ts, card.lastSeenTs). After that, post only in its thread.`;
+  }
+  const main = job.repo || repoRoots(config)[0];
+  const repo = job.repoDir
+    ? `\nRepo: your own git worktree of ${main} at ${job.repoDir}, branch ${job.branch}${job.base ? `, started from backup snapshot ${job.base.slice(0, 10)}` : ""}. Make every repo change there and commit it on that branch; the user brings it to main.`
     : "";
-  const perms = Array.isArray(job.perms) && job.perms.length ? `\nThe user OK'd for this card: ${job.perms.join(", ")}.` : "";
-  const where = `Job folder (the only place you may run commands; write --file inputs here): ${job.workDir}${
-    job.repoDir ? `\nCode: the git worktree at ${job.repoDir}, branch ${job.branch}` : ""
-  }${repo}
-${perms}
+  const where = `Job folder (your working directory; scratch work, queries and --file inputs go here): ${job.workDir}${repo}
+No permission checks: you may run anything. Three things need the user's explicit yes in the card thread first, for that exact action (references/card-session.md "Three things need a yes"):
+1. Changing main: committing, merging or pushing to main, or editing files in the main checkout${main ? ` (${main})` : ""}.
+2. Sending anything as the user to other people (Slack outside your card thread, email, invites). Draft it instead.
+3. Writing to production data (${prodLine(config)}: tables, jobs, dashboards). Dev and scratch are fine.
 ${post}
 State CLI: node ${aq}   (your item: get ${item.id}; you may update only ${item.id})
 Skill: ${SKILL_DIR}`;
@@ -315,7 +475,7 @@ ${where}`;
   }
   if (item.direct && !job.sessionStarted) {
     return `${head}
-${intro}This is a direct ask: the user wrote to you in their self-DM, and that message is the card. Do what it asks and answer in its thread (card-session.md section 5). Their message (ts ${item.card.ts}):
+${intro}This is a direct ask: the user wrote to you in ${bot && item.card.channelId === bot ? "their DM with the bot" : "their self-DM"}, and that message is the card. Do what it asks and answer in its thread (card-session.md section 5). Their message (ts ${item.card.ts}):
 ${item.excerpt || item.title}
 ${replies ? `\nTheir replies under it since:${replies}` : ""}
 ${where}`;
@@ -433,7 +593,8 @@ export async function execJob(id, { home = resolveHome(), claudeBin = process.en
   const resume = item.job.sessionStarted && item.job.sessionId;
   // A background session keeps the options it was started with. Passing new ones (a card session
   // turning into a work run, or a new model) starts a copy with the full history under a new id.
-  const sameOptions = resume && item.job.bgKind === kind && item.job.bgModel === limits.model;
+  // Sessions started under the old guard (dontAsk) carry no bgMode: they restart with these options.
+  const sameOptions = resume && item.job.bgKind === kind && item.job.bgModel === limits.model && item.job.bgMode === BG_MODE;
   const args = sameOptions
     ? ["--bg", "--resume", item.job.sessionId, "--", prompt]
     : [
@@ -443,17 +604,15 @@ export async function execJob(id, { home = resolveHome(), claudeBin = process.en
         "--model",
         limits.model,
         ...(limits.effort ? ["--effort", limits.effort] : []),
+        // No permission checks: the prompt names the few things that need the user's yes.
         "--permission-mode",
-        "dontAsk",
+        BG_MODE,
         "--settings",
         settingsFile(home, id),
         "--add-dir",
         SKILL_DIR,
-        // The repos' skills load from here; the guard still decides what each call may touch.
+        // The repos' skills load from here.
         ...repoRoots(store.config()).flatMap((root) => ["--add-dir", root]),
-        "--disallowedTools",
-        "WebFetch",
-        "WebSearch",
         ...(resume ? ["--resume", item.job.sessionId] : []),
         "--", // the list flags above would otherwise take the prompt as one more value
         prompt,
@@ -475,7 +634,7 @@ export async function execJob(id, { home = resolveHome(), claudeBin = process.en
     code = err.status || 1;
   }
   if (!bgId) return finishRun(store, id, { code: code || 1, reason: null, limits, home });
-  patchJob(store, id, sameOptions ? { sessionStarted: true, bgId } : { sessionStarted: true, bgId, bgKind: kind, bgModel: limits.model });
+  patchJob(store, id, sameOptions ? { sessionStarted: true, bgId } : { sessionStarted: true, bgId, bgKind: kind, bgModel: limits.model, bgMode: BG_MODE });
 
   let reason = null;
   let missing = 0;
@@ -562,8 +721,9 @@ if (isMain) {
     if (command === "tick") result = tick();
     else if (command === "exec" && /^AQ-\d+$/.test(id || "")) result = await execJob(id);
     else if (command === "status") result = listJobs(createStore(resolveHome()));
+    else if (command === "purge") result = purgeOld(createStore(resolveHome()), new Date(), { days: Number(id) || RETENTION_DAYS, force: true });
     else {
-      process.stderr.write("usage: dispatch.mjs tick | status | exec <AQ-n>\n");
+      process.stderr.write("usage: dispatch.mjs tick | status | purge [days] | exec <AQ-n>\n");
       process.exit(64);
     }
     process.stdout.write(`${JSON.stringify(result)}\n`);

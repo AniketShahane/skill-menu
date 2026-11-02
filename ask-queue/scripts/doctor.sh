@@ -27,6 +27,15 @@ node "$AQ" settings >"$SETTINGS"
 
 echo "Claude Code: $("$CLAUDE_BIN" --version 2>/dev/null || echo unknown)"
 node "$SKILL_DIR/scripts/gate.mjs" check || fail "gate token check failed (fix or remove ~/.config/ask-queue/slack-token)"
+BOT_CHECK="$(node "$SKILL_DIR/scripts/slack.mjs" check)" || fail "Slack bot token check failed (references/setup.md step 7)"
+echo "Slack bot:   $BOT_CHECK"
+CARD_CH="$(node "$AQ" config get slack.cardChannel 2>/dev/null | tr -d '"' || true)"
+if [ -n "$CARD_CH" ] && [ "$CARD_CH" != "null" ]; then
+  echo "🤖 ask-queue health check: the bot can post here." | node "$SKILL_DIR/scripts/slack.mjs" post >/dev/null ||
+    fail "the bot could not post in its DM (slack.cardChannel $CARD_CH)"
+  echo "Bot DM:      test message posted in $CARD_CH"
+  if pgrep -f "scripts/watch.mjs" >/dev/null; then echo "Watcher:     running"; else echo "Watcher:     NOT running (crontab line for watch.sh, setup.md step 9)"; fi
+fi
 echo "Data dir:    $ASK_QUEUE_HOME"
 echo "Running a headless check (about a minute)..."
 
@@ -38,9 +47,8 @@ Answer with only this JSON: {\"slack\":{\"search\":bool,\"read_thread\":bool,\"s
 cd "$ASK_QUEUE_HOME"
 "$CLAUDE_BIN" -p "$PROMPT" \
   --model sonnet \
-  --permission-mode dontAsk \
+  --permission-mode bypassPermissions \
   --settings "$SETTINGS" \
-  --disallowedTools WebFetch WebSearch \
   --output-format text
 
 cat <<'EOF'

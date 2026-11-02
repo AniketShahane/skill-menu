@@ -120,14 +120,19 @@ test("prompt hook: typed text allows like a reply; dispatch prompts never do", (
   assert.deepEqual(promptHook(home, id, { prompt: "also README.md please" }), [path.join(repo, "README.md")]);
 });
 
-test("settings and prompt: workers get the prompt hook and see what they may edit", () => {
+test("settings and prompt: no hooks; the prompt names the worktree and the three things that need a yes", () => {
   const { home, store, repo, id } = setup();
-  assert.ok(headlessSettings(home, id).hooks.UserPromptSubmit, "worker");
-  assert.equal(headlessSettings(home).hooks.UserPromptSubmit, undefined, "sweep and replies runs");
-  reply(store, id, "README.md");
+  assert.equal(headlessSettings(home, id).hooks, undefined, "worker");
+  assert.equal(headlessSettings(home).hooks, undefined, "sweep and replies runs");
   const item = store.getItem(id);
-  const prompt = workerPrompt(home, { ...item, job: { ...item.job, workDir: "/w", dir: "/j" } }, store.config());
-  assert.ok(prompt.includes(`allowed now: ${path.join(repo, "README.md")}`));
+  const job = { ...item.job, workDir: "/w", dir: "/j", repoDir: "/w/repo", branch: "aq/AQ-1-x", base: "abcdef0123456789" };
+  const prompt = workerPrompt(home, { ...item, job }, store.config());
+  assert.ok(prompt.includes(`worktree of ${repo} at /w/repo, branch aq/AQ-1-x, started from backup snapshot abcdef0123`));
+  assert.match(prompt, /No permission checks/);
+  assert.match(prompt, /1\. Changing main/);
+  assert.match(prompt, /2\. Sending anything as the user/);
+  assert.match(prompt, /3\. Writing to production data \(production Databricks or any production warehouse/);
+  assert.match(workerPrompt(home, { ...item, job }, { ...store.config(), prodProfile: "prod-x" }), /3\. Writing to production data \(Databricks profile prod-x:/);
   const off = workerPrompt(home, { ...item, job: { ...item.job, workDir: "/w", dir: "/j" } }, {});
-  assert.ok(!off.includes("Repo files"), "no roots: no repo line");
+  assert.ok(!off.includes("Repo:"), "no repo: no repo line");
 });

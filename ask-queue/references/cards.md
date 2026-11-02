@@ -1,13 +1,28 @@
 # Cards
 
-Every message goes to the user's self-DM, starts with 🤖, and is easy to read on a phone. A card is
+Every message goes to the card channel (below), starts with 🤖, and is easy to read on a phone. A card is
 one top-level message; everything about that ask happens in its thread. Each card and its thread
 replies are posted by that card's own session ([card-session.md](card-session.md)); the filtered
 digest and promotion offers by the sweep.
 
+## Where to post
+
+The card channel is `config.slack.cardChannel` (the bot's DM with the user) when set, else
+`config.slack.selfDmId` (the old self-DM).
+
+- **Bot DM** (`cardChannel` set): post as the bot. Write the message to a file in your working
+  folder, then `node <skill-dir>/scripts/slack.mjs post --file <file.md>` for a top-level message,
+  add `--thread <card ts>` for a thread reply, or `--update <ts>` to edit a bot message. It prints
+  `{"channel","ts"}`. It can only post in that DM. Never use `slack_send_message` there: that
+  posts as the user. Reading threads and reacting 👀 still use the Slack tools.
+- **Self-DM** (no `cardChannel`, or a card that still lives there): `slack_send_message` with
+  `channel_id` = `card.channelId` (or `selfDmId`), plus `thread_ts` for thread replies.
+
+Either way the text is the same **standard markdown**.
+
 ## Formatting rules
 
-`slack_send_message` reads **standard markdown** and converts it for Slack:
+Both ways read **standard markdown** and convert it for Slack:
 
 - Bold is `**word**`. Never `*word*`: it shows as italics. Italics is `_word_`.
 - No `#` headers, no tables, no `---`. Use a bold label line instead of a header.

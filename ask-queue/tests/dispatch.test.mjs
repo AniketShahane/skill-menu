@@ -6,7 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { addCandidate, createStore, updateItem } from "../scripts/aq.mjs";
-import { execJob, sessionName, settingsFile, tick, trustJobsFolder } from "../scripts/dispatch.mjs";
+import { execJob, sessionName, settingsFile, tick, trustJobsFolder, snapshotRepo } from "../scripts/dispatch.mjs";
 import { decide, makeContext } from "../scripts/guard.mjs";
 import { fakeBgClaude } from "./helpers.mjs";
 
@@ -62,7 +62,7 @@ test("tick starts at most workers.max and queues the rest, in order", () => {
   assert.match(job.sessionId, /^[0-9a-f-]{36}$/);
   assert.ok(fs.readFileSync(path.join(job.dir, "brief.md"), "utf8").includes("Write a.txt"));
   assert.ok(fs.existsSync(job.workDir));
-  assert.match(fs.readFileSync(settingsFile(home, "AQ-1"), "utf8"), /--worker AQ-1/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(settingsFile(home, "AQ-1"), "utf8")), { env: { ASK_QUEUE_HOME: home, ASK_QUEUE_ITEM: "AQ-1" } });
   assert.ok(!fs.existsSync(path.join(job.dir, "settings.json")), "guard settings stay out of the writable job folder");
 });
 
@@ -100,6 +100,61 @@ test("repo work gets a git worktree on a new local branch", () => {
   assert.ok(fs.existsSync(path.join(job.repoDir, "x.txt")));
 });
 
+test("a worktree starts from an aq-backup snapshot of uncommitted and new files, never secrets", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "aq-repo-"));
+  const git = (...args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: "pipe" }).trim();
+  git("init", "-q", "-b", "main");
+  fs.writeFileSync(path.join(repo, "x.txt"), "x");
+  git("add", ".");
+  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init");
+  const head = git("rev-parse", "HEAD");
+  fs.writeFileSync(path.join(repo, "x.txt"), "changed");
+  fs.writeFileSync(path.join(repo, "new.txt"), "new");
+  fs.writeFileSync(path.join(repo, ".env"), "SECRET=1");
+  fs.writeFileSync(path.join(repo, "credentials.json"), "{}");
+
+  const first = snapshotRepo(repo, "AQ-1");
+  assert.equal(first.pushed, false, "no origin: logged, not fatal");
+  assert.equal(git("rev-parse", "aq-backup"), first.sha);
+  assert.equal(git("rev-parse", `${first.sha}^`), head);
+  assert.equal(git("show", `${first.sha}:x.txt`), "changed");
+  assert.equal(git("show", `${first.sha}:new.txt`), "new");
+  assert.throws(() => git("show", `${first.sha}:.env`));
+  assert.throws(() => git("show", `${first.sha}:credentials.json`));
+  assert.equal(git("rev-parse", "HEAD"), head, "main untouched");
+  assert.equal(git("status", "--porcelain"), "M x.txt\n?? .env\n?? credentials.json\n?? new.txt", "index and files untouched");
+
+  assert.equal(snapshotRepo(repo, "AQ-2").sha, first.sha, "nothing changed: no new commit");
+  fs.writeFileSync(path.join(repo, "new.txt"), "newer");
+  const second = snapshotRepo(repo, "AQ-3");
+  assert.equal(git("rev-parse", `${second.sha}^`), first.sha, "one rolling branch: each snapshot on top of the last");
+
+  const { home, store } = setup(1);
+  const config = store.config();
+  config.repoEdit = { roots: [repo] };
+  fs.writeFileSync(store.paths.config, JSON.stringify(config));
+  tick({ home, spawnSupervisor: () => {}, alive: () => true });
+  const job = store.getItem("AQ-1").job;
+  assert.equal(job.base, second.sha, "every card gets a worktree from the latest snapshot");
+  assert.equal(fs.readFileSync(path.join(job.repoDir, "new.txt"), "utf8"), "newer");
+});
+
+test("exec: a session saved under the old dontAsk guard restarts with bypassPermissions, keeping its history", async () => {
+  const { home, store } = setup(1);
+  process.env.ASK_QUEUE_HOME = home;
+  const claudeBin = fakeClaude(home, "report");
+  tick({ home, spawnSupervisor: () => {}, alive: () => true });
+  await execJob("AQ-1", { home, claudeBin });
+  updateItem(store, "AQ-1", { patch: { job: { bgMode: null, followUp: "go on" } }, internal: true });
+  updateItem(store, "AQ-1", { status: "ready" });
+  tick({ home, spawnSupervisor: () => {}, alive: () => true });
+  await execJob("AQ-1", { home, claudeBin });
+  const [, second] = calls(home);
+  assert.equal(second.args[second.args.indexOf("--permission-mode") + 1], "bypassPermissions", "restarted with the new options");
+  assert.ok(second.args.includes("--resume"), "history carries over");
+  assert.equal(store.getItem("AQ-1").job.bgMode, "bypassPermissions");
+});
+
 test("a bad repo sends the item back to scoping with a notice", () => {
   const { home, store } = setup(1, { repo: "/nonexistent/repo" });
   const result = tick({ home, spawnSupervisor: () => {}, alive: () => true });
@@ -125,7 +180,7 @@ test("exec: first run uses --session-id, a follow-up resumes the same session", 
   const [first, second] = calls(home);
   assert.ok(first.args.includes("--bg") && !first.args.includes("--resume"));
   assert.equal(first.args[first.args.indexOf("--name") + 1], "AQ-1 Job 1");
-  assert.equal(first.args[first.args.indexOf("--permission-mode") + 1], "dontAsk");
+  assert.equal(first.args[first.args.indexOf("--permission-mode") + 1], "bypassPermissions");
   assert.deepEqual(second.args.slice(0, 3), ["--bg", "--resume", sessionId], "same session, saved options");
   assert.match(second.args.at(-1), /make it shorter/);
   assert.equal(first.args.at(-2), "--", "the prompt can't be read as a flag value");

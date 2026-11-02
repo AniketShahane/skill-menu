@@ -263,11 +263,10 @@ test("now reports local time in the configured timezone", () => {
   assert.equal(now.timezoneConfirmed, true);
 });
 
-test("settings wires the guard hook with absolute, quoted paths", () => {
+test("settings pass the data dir and wire no guard hook", () => {
   const store = freshStore();
   const settings = run(["settings"], { ASK_QUEUE_HOME: store.paths.home });
-  const command = settings.hooks.PreToolUse[0].hooks[0].command;
-  assert.match(command, /^node '\/.+\/scripts\/guard\.mjs' '\/.+'$/);
+  assert.deepEqual(settings, { env: { ASK_QUEUE_HOME: store.paths.home } });
 });
 
 test("CLI prints JSON and reports errors on stderr with exit 1", () => {

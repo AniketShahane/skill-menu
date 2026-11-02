@@ -200,7 +200,8 @@ export const AFTER_CLOSE_WATCH_MS = 48 * 60 * 60 * 1000;
 
 const DEFAULT_CONFIG = {
   timezone: null,
-  slack: { userId: null, selfDmId: null },
+  // cardChannel: the bot's DM with the user, where cards live (slack.mjs connect). Unset: the self-DM.
+  slack: { userId: null, selfDmId: null, cardChannel: null },
   jira: { cloudId: null, accountId: null, projects: [] },
   gmail: { account: null },
   sources: { slack: true, jira: false, zoom: false, gmail: false },
@@ -528,20 +529,25 @@ const directTitle = (text) => {
 
 // Creates the item for a direct ask ({ts, text, editedTs}). Its card is the user's own message, so no
 // card is posted and no pre-check runs: the user asked for it. Same message again: duplicate.
+// Where cards live (the bot DM, else the self-DM). In the bot DM any top-level message is an ask;
+// in the self-DM it must start with "Claude,".
 export function addDirect(store, { ts, text, editedTs } = {}, clock) {
   if (typeof ts !== "string" || !/^\d+\.\d+$/.test(ts)) throw new AqError("direct needs the message ts");
-  if (typeof text !== "string" || !DIRECT_ASK.test(text)) throw new AqError('a direct ask starts with "Claude," or "Claude:"');
-  const selfDmId = store.config().slack?.selfDmId;
-  if (!selfDmId) throw new AqError("slack.selfDmId is not set: run setup first");
+  const { selfDmId, cardChannel } = store.config().slack || {};
+  const channelId = cardChannel || selfDmId;
+  if (!channelId) throw new AqError("slack.selfDmId is not set: run setup first");
+  const inBotDm = Boolean(cardChannel && cardChannel !== selfDmId);
+  if (typeof text !== "string" || !text.trim()) throw new AqError("direct needs the message text");
+  if (!inBotDm && !DIRECT_ASK.test(text)) throw new AqError('a direct ask starts with "Claude," or "Claude:"');
   const result = addCandidate(
     store,
     {
       title: directTitle(text),
-      source: { kind: "direct", who: "you", where: "your self-DM", channelId: selfDmId, ts },
+      source: { kind: "direct", who: "you", where: inBotDm ? "your DM with the bot" : "your self-DM", channelId, ts },
       excerpt: text,
       fingerprints: [`direct:${ts}`],
       direct: true,
-      card: { channelId: selfDmId, ts, lastSeenTs: editedTs && compareTs(editedTs, ts) > 0 ? editedTs : ts },
+      card: { channelId, ts, lastSeenTs: editedTs && compareTs(editedTs, ts) > 0 ? editedTs : ts },
     },
     clock,
   );
@@ -936,14 +942,12 @@ export function nowInfo(store, clock) {
 // Settings JSON for headless runs: wires the guard hook with absolute paths, and points every command
 // at this data directory (background sessions don't inherit the caller's environment).
 // With workerId: the worker profile (guard.mjs --worker), which only polices outward actions.
+// Settings for headless runs. Background sessions don't inherit env, so the data dir goes here.
+// The guard hook (guard.mjs) is off for now: runs use bypassPermissions, and the prompt names the
+// few actions that need the user's yes.
 export function headlessSettings(home, workerId) {
-  const guard = path.join(SKILL_DIR, "scripts", "guard.mjs");
-  const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
   if (workerId !== undefined && !/^AQ-\d+$/.test(String(workerId))) throw new AqError(`Invalid item id: ${workerId}`);
-  const worker = workerId ? ` --worker ${workerId}` : "";
-  const hook = [{ hooks: [{ type: "command", command: `node ${quote(guard)} ${quote(home)}${worker}`, timeout: 20 }] }];
-  // Workers also see the user's typed prompts, which may allow repo edits (guard.mjs promptHook).
-  return { env: { ASK_QUEUE_HOME: home }, hooks: { PreToolUse: hook, ...(workerId ? { UserPromptSubmit: hook } : {}) } };
+  return { env: { ASK_QUEUE_HOME: home, ...(workerId ? { ASK_QUEUE_ITEM: String(workerId) } : {}) } };
 }
 
 // ---------- CLI ----------
@@ -985,7 +989,7 @@ const USAGE = `usage: aq.mjs <command>
   promote <askType> | demote <askType> | propose <askType> [--ts cardTs] | decline <askType>
   jobs                                  running and queued workers
   stop <id>                             stop a running worker (or un-queue a ready item)
-  settings [--worker <id>]              headless Claude settings (guard hook)`;
+  settings [--worker <id>]              headless Claude settings`;
 
 export function run(argv, env = process.env, clock) {
   const [command, ...rest] = argv;
