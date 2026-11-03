@@ -184,16 +184,23 @@ test("gate: old self-DM cards can't be read by the bot, so a Claude run reads th
   assert.ok(slack.calls.every((c) => c.params.channel !== "D_SELF"));
 });
 
-test("gate: a bot token never searches; sweeps keep the fixed schedule", async () => {
+test("gate: a bot token never calls Slack search; it uses the Haiku probe, or the fixed schedule when off", async () => {
   const { home, store } = freshHome();
   const state = store.state();
   state.checkpoints.slack = "2026-11-02T14:00:00Z";
   state.checkpoints["sweep:last"] = "2026-11-02T14:59:00Z";
   store.saveState(state);
   const slack = fakeSlack();
-  const result = await decide("sweep", { home, token: BOT_TOKEN, fetchImpl: slack.fetchImpl, clock });
-  assert.equal(result.fallback, true);
-  assert.match(result.reason, /can't search/);
+  const probeImpl = async () => ({ run: false, reason: "no new Slack asks", cost: 0.005 });
+  const quiet = await decide("sweep", { home, token: BOT_TOKEN, fetchImpl: slack.fetchImpl, clock, probeImpl });
+  assert.equal(quiet.run, false);
+  assert.equal(slack.calls.length, 0);
+  const config = store.config();
+  config.gate = { ...config.gate, probe: "off" };
+  fs.writeFileSync(store.paths.config, JSON.stringify(config));
+  const off = await decide("sweep", { home, token: BOT_TOKEN, fetchImpl: slack.fetchImpl, clock, probeImpl });
+  assert.equal(off.fallback, true);
+  assert.match(off.reason, /can't search/);
   assert.equal(slack.calls.length, 0);
 });
 

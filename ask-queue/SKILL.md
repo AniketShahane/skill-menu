@@ -46,7 +46,8 @@ The bot (cards.md "Where to post") posts only in its DM with the user: cards and
 through `scripts/slack.mjs post`. `scripts/watch.mjs` hears that DM live, and `scripts/gate.mjs`
 runs before every scheduled run; neither uses a model. They hand card-thread replies to their
 sessions and start a Claude run only when something else is left. A bot can't search Slack, so
-sweeps keep their fixed schedule. Every request is logged in `logs/events.jsonl`, and closed asks
+the sweep gate runs a lean Haiku search through the Slack connector instead (`scripts/probe.mjs`,
+about $0.005; any doubt starts the sweep; `gate.probe: "off"` turns it off). Every request is logged in `logs/events.jsonl`, and closed asks
 are deleted after 90 days (`dispatch.mjs purge`).
 
 ## Hard rules

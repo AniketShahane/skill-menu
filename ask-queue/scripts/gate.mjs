@@ -2,9 +2,10 @@
 // Token-free pre-check: decides whether a Claude run is needed, using plain Slack Web API reads.
 // Optional. Uses the ask-queue bot's token (slack.mjs loadToken: env, AWS Secrets Manager or
 // ~/.config/ask-queue/slack-token). With bot scope im:history it reads the bot's DM with the user,
-// where cards live (config slack.cardChannel). A bot token can't search, so sweeps keep the fixed
-// schedule; cards still in the old self-DM are read by a Claude run on the fixed schedule too.
-// Without a token, runs fall back to the fixed schedule.
+// where cards live (config slack.cardChannel). A bot token can't search, so the sweep check runs a
+// lean Haiku search through the claude.ai Slack connector instead (probe.mjs, ~$0.005). Cards still
+// in the old self-DM are read by a Claude run on the fixed schedule.
+// Without a token, or when the check fails, runs fall back to the fixed schedule.
 //
 //   gate.mjs replies   routes card-thread replies to their card sessions (no Claude run), then
 //                      exit 0 = run Claude for the rest (writes tmp/inbox.json), exit 10 = nothing left
@@ -29,6 +30,7 @@ import {
   workerConfig,
 } from "./aq.mjs";
 import { tick } from "./dispatch.mjs";
+import { probe as haikuProbe } from "./probe.mjs";
 import { botDm, cardChannel, loadToken, logEvent } from "./slack.mjs";
 
 export { loadToken };
@@ -325,7 +327,7 @@ function legacyDue(home, inbox, now) {
 
 const dayBefore = (iso) => new Date(Date.parse(iso) - 24 * 3600 * 1000).toISOString().slice(0, 10);
 
-export async function sweepNeeded(store, call, clock) {
+export async function sweepNeeded(store, call, clock, probeImpl = haikuProbe) {
   const config = store.config();
   const state = store.state();
   const now = (clock ? clock() : new Date()).getTime();
@@ -344,11 +346,19 @@ export async function sweepNeeded(store, call, clock) {
     return { run: true, reason: `no full sweep for ${quietHours}h: reconcile drafts and learn` };
   }
 
-  // One hit is enough to decide, so a single page per query is fine here.
-  if (call.isBot) {
-    throw new Error("a bot token can't search Slack");
-  }
   const { userId, selfDmId } = config.slack;
+  // A bot token can't search Slack: a lean Haiku run searches through the claude.ai connector
+  // instead (probe.mjs). Any doubt there means "run"; a failed probe throws (fixed schedule).
+  if (call.isBot) {
+    if (config.gate?.probe === "off") throw new Error("a bot token can't search Slack");
+    const after = Date.parse(since) / 1000;
+    const result = await probeImpl({ userId, after, ignoreChannels: [selfDmId, cardChannel(config)] });
+    const cost = result.cost == null ? "" : ` (probe $${result.cost.toFixed(4)})`;
+    // `seen` goes into the run log, so a later card can be traced to the check that woke Sonnet.
+    const seen = (result.hits || []).map((h) => `slack:${h.channel}:${h.ts}`);
+    return { run: result.run, reason: `${result.reason}${cost}`, ...(seen.length ? { seen } : {}) };
+  }
+  // One hit is enough to decide, so a single page per query is fine here.
   const sinceEpoch = Date.parse(since) / 1000;
   const hits = new Set();
   for (const query of [`to:<@${userId}> after:${dayBefore(since)}`, `<@${userId}> after:${dayBefore(since)}`]) {
@@ -385,7 +395,7 @@ export function fallbackDue(home, mode, now) {
 }
 
 // One gate decision. Never throws: a failed check falls back to the old fixed schedule.
-export async function decide(mode, { home, token, fetchImpl, clock } = {}) {
+export async function decide(mode, { home, token, fetchImpl, clock, probeImpl } = {}) {
   const store = createStore(home);
   const now = clock ? clock() : new Date();
   const inboxFile = path.join(home, "tmp", "inbox.json");
@@ -414,7 +424,7 @@ export async function decide(mode, { home, token, fetchImpl, clock } = {}) {
           ? { run: true, reason: `${inbox.legacy.length} cards in the old self-DM to read${sent}`, inbox: "tmp/inbox.json", routed }
           : { run: false, reason: `nothing for the replies run${sent}`, routed };
     } else {
-      result = await sweepNeeded(store, call, clock);
+      result = await sweepNeeded(store, call, clock, probeImpl);
     }
   } catch (err) {
     const reason = `${err.message}; fixed schedule (every ${FALLBACK_MINUTES[mode]}m)`;
