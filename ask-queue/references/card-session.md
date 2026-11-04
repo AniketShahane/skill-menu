@@ -26,6 +26,8 @@ passes their new messages to you in the prompt (oldest first, `[ts] text`). An e
 
 ## 1. First run: prep the ask and post its card
 
+A weekly report item (`source.kind` `report`) follows section 7 instead.
+
 0. **Is the user already on it?** The sweep pre-checked this ask (`precheck` on the item: its
    verdict and reason), but the user may have acted since. Read the source thread
    (`slack_read_thread`) and the ask's reactions (`slack_get_reactions`, or a detailed
@@ -41,6 +43,9 @@ passes their new messages to you in the prompt (oldest first, `[ts] text`). An e
 3. **Label.** `askType`: reuse a playbooks.md label when one fits; otherwise coin a kebab-case 1–3
    word label.
 4. **Choose the card.**
+   - Already answered, or someone else's: when the ledger, projects.md or a dashboard already has
+     the answer, or the ask belongs to another owner, the draft is a short pointer (the link, or
+     who owns it and a loop-in). Often the best reply; prefer it to new work.
    - Real work (a doc, analysis, query, code): a scope card, status `scoping` ([work.md](work.md)
      sections 1–2). Massive work: a `brief` instead.
    - `approving`: you can produce the output now. Guesses are fine when labeled.
@@ -52,6 +57,7 @@ passes their new messages to you in the prompt (oldest first, `[ts] text`). An e
 5. **Draft** (approving only). Write in the user's voice (style.md), tuned to the asker (people.md),
    short, with only facts you can trace. If a `writing` skill is installed, follow it too: medium
    level for formal replies, loose for casual ones. Follow the playbook for the type when there is one.
+   A number in the draft follows section 6.
 6. **Post the card** as one top-level message in the card channel (cards.md "Where to post": as
    the bot with `slack.mjs post` when `cardChannel` is set). Then save everything in one update:
    `askType`, `prep`, `questions` or `draft`, and `card` = `{ "channelId": <channel>, "ts": <message
@@ -102,6 +108,10 @@ required words. Work cards (`scoping`, `review`) follow [work.md](work.md) secti
 | done, skipped | more to do ("also attach the Q4 tab") | Reopen: a follow-up draft (`approving`) or questions (`asking`); say so in the thread. The old draft stays as it was. |
 | done, skipped | a thank-you, nothing to do | Set the same status again. No reply. |
 | any | a fact for later ("Sam is out next week") | Memory (learn.md section 3), confirm in one line. |
+| tracking (a reminder card) | kept ("done", "sent", "they answered") | `done` with `--note "kept: …"`, confirm in one line. No ledger entry. |
+| tracking | a new date ("Monday", "after the offsite") | `track.due` = that date, `dueGuessed` false, confirm, stay `tracking`: a new reminder comes then. |
+| tracking | "draft it", "nudge them" | Draft it (a nudge is a `slack-reply` in the source thread), post it for approval, set `approving`. |
+| tracking | drop it, or "that wasn't a promise" | `skipped`; the second also adds a `## Filters` line to playbooks.md. |
 
 Answers teach memory: after recording them, apply learn.md "Memory" to anything reusable ("Q3
 numbers live in Finance's sheet"). When the card closes (`done`, `skipped`, `filtered`), write its
@@ -131,6 +141,7 @@ Then `$AQ update AQ-n --status drafted --file <job folder>/AQ-n.json` with the d
 | got "go" | `ready`, with `job.kind` `work` and `job.brief` (work.md section 3) |
 | posted a work result or a question mid-work | `review` |
 | closed it | `done`, `skipped` or `filtered` (plus the ledger entry) |
+| moved a reminder's date | `tracking` |
 | nothing changed | the status it had (`$AQ get` shows it as `job.restingStatus`) |
 
 ## 5. Direct asks
@@ -153,3 +164,33 @@ their message). There is no card to post and no draft to approve: they asked you
 4. Hard rules still hold: drafts only, the three things that need a yes (section 2), never invent facts.
 5. End status: `done` once answered (ledger entry, learn.md), `review` when they should look at a
    result, `asking` when blocked. A reply in the thread resumes you like any card reply (section 2).
+
+## 6. Data answers
+
+A number someone will act on (a volume, a count, a rate) is checked before it goes in a draft:
+
+1. **Reuse.** `$AQ ledger find "<topic words>"`: a past answer's `facts` name its query. A fact
+   marked `stale` is re-run, never quoted.
+2. **Run it** with the repo's data skills: small window first, partition filters, read-only. Save
+   the query in your job folder.
+3. **Check it once** against a second source when one is cheap (another table, a dashboard, a
+   public API for a few accounts). They disagree beyond rounding: say so on the card and ask; never
+   pick one quietly. No second source: say "single source".
+4. **Say where it's from:** the number, its date range and as-of time, and the source (dashboard
+   link or table name).
+5. Record each number in the ledger entry's `facts` (learn.md section 2).
+
+## 7. Weekly report (`source.kind` `report`)
+
+dispatch.mjs makes this item once a week (config `report`). It is for the user only. Instead of
+section 1 steps 0–5, run `$AQ report` and `$AQ repeats` and post one card (cards.md "Weekly report
+card"):
+
+- **What moved and what to change.** Asks the user answered before the card came mean prep is too
+  slow or those didn't need a card; a falling one-tap rate means drafts miss.
+- **Repeats:** each topic from `repeats`, with a copy-ready Jira ticket (title, and why: N asks from
+  whom) for a dashboard, doc or Genie space. Then `$AQ repeats --mark <topic>` for each one shown.
+- **Dashboard:** the SKILL.md "dashboard" mode. No Artifact tool in this run: end the card with
+  "say *refresh dashboard* in Claude Code to update it" instead.
+
+Set `done` after posting. Report cards get no ledger entry.

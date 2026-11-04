@@ -24,17 +24,25 @@ import {
   AFTER_CLOSE_WATCH_MS,
   CARD_BRIEF,
   DIRECT_BRIEF,
+  OWN_KINDS,
+  REPORT_BRIEF,
   SKILL_DIR,
   TRANSITIONS,
+  addCandidate,
+  addDays,
   createStore,
   enteredStatusAt,
   headlessSettings,
   listJobs,
+  localParts,
   repoRoots,
   resolveHome,
+  timezoneOf,
   updateItem,
+  validDay,
   workerConfig,
 } from "./aq.mjs";
+import { botPost, loadToken } from "./slack.mjs";
 
 const pollMs = () => Number(process.env.ASK_QUEUE_POLL_MS) || 5000;
 // A worker that set `working` this recently may not have recorded its pid yet.
@@ -43,7 +51,7 @@ const START_GRACE_MS = 60_000;
 // A prep run that ends without a posted card is retried this many times in all.
 const PREP_ATTEMPTS = 3;
 // Resting statuses a card run may leave the item in (ready/working are dispatch states).
-const RESTING = ["new", "asking", "approving", "drafted", "scoping", "review", "done", "filtered", "skipped"];
+const RESTING = ["new", "asking", "approving", "drafted", "tracking", "scoping", "review", "done", "filtered", "skipped"];
 
 const today = (now) => now.toISOString().slice(0, 10);
 
@@ -226,10 +234,10 @@ function queuePreps(store, now, config = {}) {
   const queued = [];
   for (const item of store.allItems().filter((i) => i.status === "new")) {
     const age = now - Date.parse(item.createdAt || 0);
-    const harvested = !item.direct && !item.card && !["manual", "direct"].includes(item.source?.kind);
+    const harvested = !item.direct && !item.card && !OWN_KINDS.includes(item.source?.kind);
     let note = "queued for its card session";
-    if (item.direct) {
-      // no wait: the user asked for it
+    if (item.direct || item.source?.kind === "report") {
+      // no wait: the user asked for it, or code made it on schedule
     } else if (age < delayMin * 60_000) {
       continue;
     } else if (harvested && item.precheck?.verdict !== "needed") {
@@ -346,6 +354,170 @@ function expireSessions(store, now) {
   return expired;
 }
 
+// ---------- weekly report, reminders, expiry (no model) ----------
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+// A report missed (machine off) is still made this many days late; after that the week is skipped.
+export const REPORT_GRACE_DAYS = 3;
+const REMIND_RETRY_MS = 30 * 60_000;
+
+// The local date of the report the queue owes now, or null: the latest report day/hour already
+// passed, at most REPORT_GRACE_DAYS ago.
+export function reportDay(now, tz, { day = "Fri", hour = 14 } = {}) {
+  const want = WEEKDAYS.findIndex((d) => d.toLowerCase() === String(day).slice(0, 3).toLowerCase());
+  const h = Number(hour);
+  if (want < 0 || !Number.isInteger(h) || h < 0 || h > 23) throw new Error(`config report: day must be a weekday (Fri) and hour 0-23, got ${day} ${hour}`);
+  const local = localParts(now, tz);
+  let back = (WEEKDAYS.indexOf(local.weekday) - want + 7) % 7;
+  if (back === 0 && local.hour < h) back = 7;
+  return back > REPORT_GRACE_DAYS ? null : addDays(local.date, -back);
+}
+
+// Makes the week's report item once (fingerprint report:<day>); its card session drafts the note.
+export function scheduleReport(store, now) {
+  const config = store.config();
+  const r = { day: "Fri", hour: 14, ...(config.report || {}) };
+  if (r.off) return null;
+  const day = reportDay(now, timezoneOf(store), r);
+  if (!day) return null;
+  const { action, id } = addCandidate(
+    store,
+    {
+      title: `Weekly report: ${addDays(day, -6)} to ${day}`,
+      source: { kind: "report", who: "you", where: "ask-queue" },
+      askType: "weekly-report",
+      excerpt: `Weekly report for the 7 days to ${day}.`,
+      fingerprints: [`report:${day}`],
+      job: { kind: "card", brief: REPORT_BRIEF },
+    },
+    () => now,
+  );
+  return action === "created" ? id : null;
+}
+
+// Promises and waits nobody replied about for track.expireDays past due close quietly.
+export function expireTracking(store, now) {
+  const days = Number(store.config().track?.expireDays) || 14;
+  const today = localParts(now, timezoneOf(store)).date;
+  const lapsed = [];
+  for (const item of store.allItems()) {
+    if (item.status !== "tracking" || !validDay(item.track?.due)) continue;
+    if (addDays(item.track.due, days) >= today) continue;
+    updateItem(store, item.id, { status: "skipped", note: `expired: ${days} days past due with no reply`, internal: true }, () => now);
+    lapsed.push(item.id);
+  }
+  return lapsed;
+}
+
+const fmtDay = (day) => new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+
+// Other people's Slack text, flattened for a one-line quote: no live mentions, no link markup.
+export function plainSlack(text, max = 200) {
+  let s = String(text ?? "")
+    .replace(/<@[A-Z0-9]+\|([^>]+)>/g, "@$1")
+    .replace(/<@[A-Z0-9]+>/g, "@someone")
+    .replace(/<!(here|channel|everyone)[^>]*>/g, "@$1")
+    .replace(/<!subteam\^[A-Z0-9]+\|([^>]+)>/g, "$1")
+    .replace(/<(?:https?|mailto):[^|>]+\|([^>]+)>/g, "$1")
+    .replace(/<(?:https?|mailto):[^>]+>/g, "(link)")
+    .replace(/<[^>]*>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (s.length > max) s = `${s.slice(0, max).replace(/\s+\S*$/, "")}…`;
+  return s;
+}
+
+// The reminder card (cards.md "Reminder card"). It becomes the item's card: replies go to a session.
+export function reminderText(item, today) {
+  const t = item.track;
+  const who = plainSlack(item.source?.who, 60) || "someone";
+  const first = who.split(" ")[0];
+  const title = plainSlack(item.title, 90);
+  const head =
+    t.kind === "waiting"
+      ? `🤖 ⏰ **${item.id} · Still waiting on ${first}: ${title}**`
+      : `🤖 ⏰ **${item.id} · ${t.due < today ? `Overdue since ${fmtDay(t.due)}` : "Due today"}: ${title}**`;
+  const where = item.source?.where ? ` · ${plainSlack(item.source.where, 60)}` : "";
+  const url = String(item.source?.url || "");
+  const from = /^https:\/\/[^\s()<>]+$/.test(url) ? `from [${who}${where}](${url})` : `from ${who}${where}`;
+  const lines = [head, from, "", t.kind === "waiting" ? `💬 **You asked ${first}**` : `💬 **You told ${first}**`, `> ${plainSlack(item.excerpt || item.title) || title}`, "", "⠀"];
+  if (t.dueGuessed) lines.push(`ℹ️ _No date was given, so I picked ${fmtDay(t.due)}._`);
+  lines.push(
+    t.kind === "waiting"
+      ? "👉 Reply **done** if they answered, a new date, **drop**, or ask me to draft a nudge."
+      : "👉 Reply **done**, a new date, **drop**, or ask me to draft it.",
+    "━━━━━━━━━━━━━━━━",
+  );
+  return lines.join("\n");
+}
+
+// Posts a reminder card for each tracking item due today or earlier (once per due date), on weekdays
+// within config track.hours, at most `max` per call. post(text) -> {channel, ts}; without one,
+// connect() makes it, only when something is due (the token may come from AWS). A failed post
+// retries after 30 minutes.
+export async function remindDue(store, { now = new Date(), post, connect, max = 5 } = {}) {
+  const config = store.config();
+  const hours = Array.isArray(config.track?.hours) && config.track.hours.length === 2 ? config.track.hours.map(Number) : [9, 18];
+  const local = localParts(now, timezoneOf(store));
+  if (["Sat", "Sun"].includes(local.weekday) || !(local.hour >= hours[0] && local.hour < hours[1])) return { skipped: "outside reminder hours" };
+  if (!config.slack?.cardChannel) return { skipped: "no bot DM (slack.cardChannel)" };
+  const due = store
+    .allItems()
+    .filter((item) => item.status === "tracking" && validDay(item.track?.due) && item.track.due <= local.date && item.track.remindedFor !== item.track.due)
+    .filter((item) => !(item.track.retryAt && Date.parse(item.track.retryAt) > now.getTime()))
+    .sort((a, b) => a.track.due.localeCompare(b.track.due) || Number(a.id.slice(3)) - Number(b.id.slice(3)));
+  if (!due.length) return { reminded: [] };
+  if (post === undefined) post = connect ? connect() : null;
+  if (!post) return { skipped: "no bot token" };
+  const result = { reminded: [], failed: [] };
+  for (const item of due.slice(0, max)) {
+    const fresh = store.getItem(item.id);
+    if (fresh.status !== "tracking" || fresh.track?.remindedFor === fresh.track?.due) continue;
+    let posted = null;
+    let error = null;
+    try {
+      posted = await post(reminderText(fresh, local.date));
+      if (!posted?.ts || !posted?.channel) error = "no message ts in the post result";
+    } catch (err) {
+      error = String(err.message || err);
+    }
+    if (error) {
+      updateItem(store, item.id, { patch: { track: { retryAt: new Date(now.getTime() + REMIND_RETRY_MS).toISOString() } }, note: `reminder failed: ${error.slice(0, 120)}`, internal: true }, () => now);
+      result.failed.push(item.id);
+      continue;
+    }
+    const patch = { card: { channelId: posted.channel, ts: posted.ts, lastSeenTs: posted.ts }, track: { remindedFor: fresh.track.due, remindedAt: now.toISOString(), retryAt: null } };
+    if (fresh.card) patch.previousCard = fresh.card;
+    updateItem(store, item.id, { patch, note: `reminder posted (due ${fresh.track.due})`, internal: true }, () => now);
+    result.reminded.push(item.id);
+  }
+  if (due.length > max) result.later = due.length - max;
+  return result;
+}
+
+// One reminder pass at a time (cron's tick and the watcher's can overlap).
+export async function remind({ home = resolveHome(), clock, post } = {}) {
+  const lock = path.join(home, ".remind.lock");
+  try {
+    fs.mkdirSync(lock);
+  } catch (err) {
+    if (err.code !== "EEXIST") throw err;
+    if (Date.now() - fs.statSync(lock).mtimeMs < 120_000) return { skipped: "another reminder pass is running" };
+    fs.rmSync(lock, { recursive: true, force: true });
+    fs.mkdirSync(lock);
+  }
+  try {
+    const store = createStore(home);
+    const connect = () => {
+      const token = loadToken();
+      return token ? (text) => botPost({ token, config: store.config(), text, home, by: "reminder" }) : null;
+    };
+    return await remindDue(store, { now: clock ? clock() : new Date(), post, connect });
+  } finally {
+    fs.rmSync(lock, { recursive: true, force: true });
+  }
+}
+
 export function tick({ home = resolveHome(), clock, spawnSupervisor = defaultSpawn, alive = supervisorAlive } = {}) {
   return withLock(home, () => {
     const store = createStore(home);
@@ -368,6 +540,15 @@ export function tick({ home = resolveHome(), clock, spawnSupervisor = defaultSpa
       if (purged && (purged.items.length || purged.ledger || purged.events || purged.logs || purged.tmp)) result.purged = purged;
     } catch (err) {
       result.purgeError = err.message;
+    }
+    // Scheduled cards and expiry never block starting sessions.
+    try {
+      const report = scheduleReport(store, now);
+      if (report) result.report = report;
+      const lapsed = expireTracking(store, now);
+      if (lapsed.length) result.lapsed = lapsed;
+    } catch (err) {
+      result.scheduleError = err.message;
     }
     result.prepQueued = queuePreps(store, now, config);
 
@@ -718,8 +899,16 @@ if (isMain) {
   const [command, id] = process.argv.slice(2);
   try {
     let result;
-    if (command === "tick") result = tick();
-    else if (command === "exec" && /^AQ-\d+$/.test(id || "")) result = await execJob(id);
+    if (command === "tick") {
+      result = tick();
+      // Reminders need the network; a failure here never hides the tick's result.
+      try {
+        const reminders = await remind();
+        if (reminders.reminded?.length || reminders.failed?.length) result.reminders = reminders;
+      } catch (err) {
+        result.remindError = err.message;
+      }
+    } else if (command === "exec" && /^AQ-\d+$/.test(id || "")) result = await execJob(id);
     else if (command === "status") result = listJobs(createStore(resolveHome()));
     else if (command === "purge") result = purgeOld(createStore(resolveHome()), new Date(), { days: Number(id) || RETENTION_DAYS, force: true });
     else {

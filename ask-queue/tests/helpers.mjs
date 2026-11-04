@@ -19,6 +19,7 @@ export function makeHome() {
   const config = store.config();
   config.slack = { userId: USER, selfDmId: SELF_DM };
   config.workers = { prepDelayMin: 0, precheckWaitMin: 0 }; // tests start prep runs at once; the delay and pre-check have their own tests
+  config.report = { off: true }; // tick runs on the real clock here: no weekly report card on Fridays (report.test.mjs)
   fs.writeFileSync(store.paths.config, JSON.stringify(config));
   return { home, store };
 }

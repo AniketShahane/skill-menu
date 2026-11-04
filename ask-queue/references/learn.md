@@ -40,13 +40,20 @@ Write to `tmp/ledger-AQ-n.json`, then `$AQ ledger add --file tmp/ledger-AQ-n.jso
   "edited": false, "editSummary": "",
   "outcome": "sent",
   "artifacts": [{ "kind": "slack-draft", "url": "https://…" }],
-  "lessons": ["Q3 numbers → Finance's live sheet"]
+  "lessons": ["Q3 numbers → Finance's live sheet"],
+  "topic": "q3-export-numbers",
+  "facts": [{ "claim": "Q3 export volume", "value": "4.2M", "asOf": "2026-09-30",
+              "source": "Finance live sheet, Q3 tab", "query": "jobs/AQ-12/work/q3.sql" }]
 }
 ```
 
-`outcome` is `sent`, `skipped`, `filtered` or `unknown`. `editSummary` says in one line what the user
-changed ("cut the greeting, added the Q4 date"). Keep `draft`/`final` under ~1,500 characters each.
-Never record secrets, passwords or tokens.
+`outcome` is `sent`, `skipped`, `filtered` or `unknown`. `edited` is true, false, or null when you
+couldn't check. `editSummary` says in one line what the user changed ("cut the greeting, added the
+Q4 date"). `topic` is what the ask was about, in kebab-case: run `$AQ topics` and reuse a label that
+fits, since repeat asks are counted by topic. `facts` lists every number the answer gave (asOf = the
+data's date), so the next ask re-runs it instead of quoting it stale. Code adds `createdAt`,
+`rounds` and `sourceKind`. Keep `draft`/`final` under ~1,500 characters each. Never record secrets,
+passwords or tokens.
 
 ## 3. Memory (after each ledger entry)
 

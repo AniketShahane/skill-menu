@@ -19,6 +19,7 @@ function setup(count = 1, job = {}) {
   store.init();
   const config = store.config();
   config.slack = { userId: "U1", selfDmId: "D1" };
+  config.report = { off: true }; // real clock: no weekly report card on Fridays
   fs.writeFileSync(store.paths.config, JSON.stringify(config));
   for (let n = 1; n <= count; n += 1) {
     addCandidate(store, { title: `Job ${n}`, source: { kind: "manual" }, fingerprints: [`m:${n}`] });

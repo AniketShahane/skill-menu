@@ -27,6 +27,9 @@ watcher (always on)  the bot hears the user's DM at once (watch.mjs, Socket Mode
                      new message ─▶ direct ask; card-thread reply ─▶ that card's session
 replies (every 2m)   catch-up: card-thread replies go straight to their session (gate.mjs, no Claude);
                      a Claude run only for the digest, promotion offers, notices, old self-DM cards
+tick (every 2m)      dispatch.mjs, no Claude: starts sessions; posts a reminder card for each promise
+                     or wait that is due; makes the weekly report card (config report); closes
+                     promises nobody answered 14 days past due
 ```
 
 Every card has its own Claude session (card-session.md). A session costs far more than a check, so
@@ -83,6 +86,8 @@ are deleted after 90 days (`dispatch.mjs purge`).
 | replies | `scripts/run.sh replies` (cron), "process my replies" | [references/replies.md](references/replies.md), [references/cards.md](references/cards.md) |
 | hand off | "run a sweep" or "process my replies" in a normal chat session | Don't run it here: that fills this chat. Start `ASK_QUEUE_FORCE=1 <skill-dir>/scripts/run.sh <mode>` in the background, then report only its outcome (new card ids, items moved, errors from the log tail). Results land in the card channel. Do it inline only if the user asks for that. |
 | card session | your prompt says you are the card session for AQ-n | [references/card-session.md](references/card-session.md), [references/cards.md](references/cards.md) |
+| dashboard | "refresh dashboard", "show my dashboard", and the weekly report card | `node <skill-dir>/scripts/dashboard.mjs` writes the page and prints its file. Publish that file with the Artifact tool: to `config dashboard.url` when set, else as a new private artifact, then `$AQ config set dashboard.url <url>`. Reply with the link. Never share it: it names colleagues. |
+| replay | "replay", "test the triage rules", or before changing sweep.md section 3 or `## Filters` | `node <skill-dir>/scripts/replay.mjs --model haiku` (past decisions vs the current rules, about $0.01; `--dry` is free). Report agreement and the misses; a change that lowers "asks caught" needs the user's OK. |
 | learn | end of every sweep and replies run, and when a card session closes its card | [references/learn.md](references/learn.md) |
 | work | a card needs real work, or a card session's work run | [references/work.md](references/work.md) |
 | chat | "what's waiting?", "check my queue" | `$AQ list --open` and post the status summary (cards.md). Answers given in chat go to that card's session (`$AQ route AQ-n --file`), never handled in this chat. |
@@ -110,12 +115,15 @@ Unattended runs (cron) have no one to answer: never ask in chat; decide, record 
 | `get AQ-n` / `update AQ-n [--status s] [--file tmp/p.json] [--note text]` | read / patch an item |
 | `ledger add --file tmp/l.json` / `ledger find <words>` | record a closed ask / search past asks and artifacts |
 | `stats`, `promote`/`demote`/`decline <type>`, `propose <type> --ts <ts>` | autonomy ladder |
+| `report [--days 7]` | the queue's numbers: intake, you-answered-first, one-tap closes, edit rate, rounds, promises |
+| `topics` / `repeats [--mark <topic>]` | topic labels in use / topics asked 3+ times by 2+ people (mark one offered) |
 | `jobs` / `stop AQ-n` | running and queued sessions / stop one (ready work goes back to scoping) |
 | `checkpoint get/set <key> [value]`, `config get/set <key> [value]`, `now` | bookkeeping |
 
 Item fields you write: `title`, `askType` (kebab-case, reuse labels from playbooks.md), `source`
 (`kind`, `who`, `where`, `url`, `channelId`, `ts`, `threadTs`, `issueKey`, `threadId`, `messageId`),
-`excerpt`, `fingerprints`, `direct`, `precheck` (`verdict`, `reason`, `relatedTo`), `prep` (`need`, `output`, `basis`), `questions` (`n`, `q`, `guess`,
+`excerpt`, `fingerprints`, `direct`, `precheck` (`verdict`, `reason`, `relatedTo`), `track` (`kind`
+`promise` or `waiting`, `due` as `2026-11-07`, `dueGuessed`), `prep` (`need`, `output`, `basis`), `questions` (`n`, `q`, `guess`,
 `basis`, `answer`), `draft` (`kind`, `text`, `target`, `ref`, `url`), `card` (`channelId`, `ts`,
 `lastSeenTs`), `job` (`kind` `card` or `work`, `brief`, `repo`, `base`, `followUp`, `notice`,
 `result`, `repoProposed`; the rest belongs to dispatch.mjs and the gate, including `repoWrites`, and
@@ -123,6 +131,8 @@ Item fields you write: `title`, `askType` (kebab-case, reuse labels from playboo
 
 Statuses: `new → asking → approving → drafted → done`, plus `skipped` and `filtered` (not an ask for
 the user; shown in a digest so it can be brought back). Work: `scoping → ready → working → review → done`.
+`tracking`: a promise the user made or an answer they wait on (sweep.md step 2b). No session runs
+until its reminder card is posted and the user replies there.
 `ready` and `working` also mean "the card's session is queued / running": a reply moves any card to
 `ready` (`job.restingStatus` keeps where it was), and every run ends by setting the card's next
 status. `ready` needs `job.brief`. A reply on a `done` or `skipped` card within 48 hours resumes its

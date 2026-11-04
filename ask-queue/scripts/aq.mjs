@@ -15,7 +15,12 @@ export const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url
 // `working` = it is running. Between runs the item rests in asking/approving/drafted (reply cards)
 // or scoping/review (work cards). Work goes scoping → ready → working → review → done.
 export const WORK_STATUSES = ["scoping", "ready", "working", "review"];
-export const OPEN_STATUSES = ["new", "asking", "approving", "drafted", ...WORK_STATUSES];
+// tracking: a promise the user made, or an answer they wait on (sweep.md step 2b). No session runs
+// until the user replies on its card; dispatch.mjs posts that card (a reminder) when it is due.
+export const OPEN_STATUSES = ["new", "asking", "approving", "drafted", "tracking", ...WORK_STATUSES];
+export const TRACK_KINDS = ["promise", "waiting"];
+// Asks the user made (manual, direct) or code made (report): no pre-check, no prep delay.
+export const OWN_KINDS = ["manual", "direct", "report"];
 export const TRANSITIONS = {
   // ready: dispatch.mjs queues the card session that preps the ask and posts its card.
   new: ["asking", "approving", "scoping", "ready", "filtered", "skipped"],
@@ -26,9 +31,11 @@ export const TRANSITIONS = {
   scoping: ["scoping", "ready", "asking", "approving", "filtered", "skipped"],
   // ready = a reply or "go" is waiting for its card session; dispatch.mjs starts it.
   ready: ["working", "scoping", "skipped"],
+  // A reply on a reminder card resumes a session; the sweep's daily check or the expiry closes it.
+  tracking: ["tracking", "ready", "done", "skipped"],
   // A run ends by setting the card's resting status (or ready: "go" queues the work run).
   // new = the prep run could not post the card and will be retried.
-  working: ["new", "asking", "approving", "drafted", "scoping", "ready", "review", "done", "filtered", "skipped"],
+  working: ["new", "asking", "approving", "drafted", "tracking", "scoping", "ready", "review", "done", "filtered", "skipped"],
   // review: the worker posted a result or a question. A reply sends it back to ready (resume).
   review: ["ready", "scoping", "done", "skipped"],
   // A reply on a closed card reopens it (follow-up input must never be lost).
@@ -49,6 +56,7 @@ export function modelIn(text) {
 // itself is the card, and its session does the task and answers in that message's thread.
 export const DIRECT_ASK = /^\s*(?:hey\s+|hi\s+)?@?claude\s*[,:]/i;
 export const DIRECT_BRIEF = "Direct ask: the user's own self-DM message is the card. Do what it asks and answer in its thread (references/card-session.md section 5).";
+export const REPORT_BRIEF = "Weekly report: post the user's week from `aq report` and `aq repeats`, and refresh the dashboard (references/card-session.md section 7).";
 export const STOP_WORDS = /^\s*(stop|stop it|stop that|cancel|cancel that|hold on|pause)[\s.!]*$/i;
 
 // ---------- repo edits ----------
@@ -188,7 +196,9 @@ export function grantRepoEdits(store, id, texts, clock) {
   });
 }
 // Statuses whose card threads are checked for replies every run.
-const WATCH_STATUSES = ["asking", "approving", "drafted", ...WORK_STATUSES];
+const WATCH_STATUSES = ["asking", "approving", "drafted", "tracking", ...WORK_STATUSES];
+// track fields the model may set; the reminder fields belong to dispatch.mjs.
+const TRACK_MODEL_KEYS = new Set(["kind", "due", "dueGuessed"]);
 // Job fields the model may set through `update --file`. The rest belong to dispatch.mjs.
 const JOB_MODEL_KEYS = new Set(["brief", "repo", "base", "followUp", "notice", "result", "kind", "repoProposed"]);
 // A type is offered for promotion after this many consecutive drafts went out unedited.
@@ -211,6 +221,14 @@ const DEFAULT_CONFIG = {
   workers: {},
   // Folders whose files a card session may edit once the user allows each file (empty: never).
   repoEdit: { roots: [] },
+  // Weekly report card for the user (dispatch.mjs): local weekday and hour.
+  report: { day: "Fri", hour: 14, off: false },
+  // The private claude.ai page dashboard.mjs output is published to (SKILL.md "dashboard").
+  dashboard: { url: null },
+  // Reminders for due promises and waits: local hours [from, to) on weekdays; unanswered ones close after expireDays.
+  track: { hours: [9, 18], expireDays: 14 },
+  // A ledger number older than this many days is re-run before it is quoted again.
+  answers: { staleDays: 7 },
 };
 
 // Background workers (dispatch.mjs). config.workers overrides any of these.
@@ -351,15 +369,38 @@ export function createStore(home) {
 
     ledgerEntries() {
       if (!fs.existsSync(p.ledger)) return [];
+      // A half-written line (a crash mid-append) is skipped, not fatal to every reader.
       return fs
         .readFileSync(p.ledger, "utf8")
         .split("\n")
         .filter((line) => line.trim())
-        .map((line) => JSON.parse(line));
+        .flatMap((line) => {
+          try {
+            const entry = JSON.parse(line);
+            return entry && typeof entry === "object" && !Array.isArray(entry) ? [entry] : [];
+          } catch {
+            return [];
+          }
+        });
     },
 
     appendLedger(entry) {
-      fs.appendFileSync(p.ledger, `${JSON.stringify(entry)}\n`);
+      // A crash mid-append can leave a line without its newline: start on a fresh line, or this
+      // entry would be glued to the broken one and skipped with it.
+      let lead = "";
+      try {
+        const fd = fs.openSync(p.ledger, "r");
+        try {
+          const { size } = fs.fstatSync(fd);
+          const last = Buffer.alloc(1);
+          if (size > 0 && fs.readSync(fd, last, 0, 1, size - 1) === 1 && last[0] !== 10) lead = "\n";
+        } finally {
+          fs.closeSync(fd);
+        }
+      } catch {
+        // no ledger yet
+      }
+      fs.appendFileSync(p.ledger, `${lead}${JSON.stringify(entry)}\n`);
     },
   };
   return store;
@@ -381,9 +422,27 @@ function validateCandidate(c) {
   for (const fp of c.fingerprints) {
     if (typeof fp !== "string" || !fp.trim()) throw new AqError("Fingerprints must be non-empty strings");
   }
-  if (c.status !== undefined && c.status !== "new" && c.status !== "filtered") {
-    throw new AqError("A new candidate's status must be 'new' or 'filtered'");
+  if (c.status !== undefined && !["new", "filtered", "tracking"].includes(c.status)) {
+    throw new AqError("A new candidate's status must be 'new', 'filtered' or 'tracking'");
   }
+  if ((c.status === "tracking") !== (c.track !== undefined)) throw new AqError("status 'tracking' and track go together");
+  if (c.track !== undefined) checkTrack(c.track);
+}
+
+// A calendar day like 2026-11-07 that really exists.
+export function validDay(day) {
+  if (typeof day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+  const d = new Date(`${day}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === day;
+}
+
+export const addDays = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+
+function checkTrack(track) {
+  if (!track || typeof track !== "object" || Array.isArray(track)) throw new AqError("track must be an object");
+  if (!TRACK_KINDS.includes(track.kind)) throw new AqError(`track.kind must be one of ${TRACK_KINDS.join(", ")}`);
+  if (!validDay(track.due)) throw new AqError("track.due must be a date like 2026-11-07 (guess one and set dueGuessed)");
+  if (track.dueGuessed !== undefined && typeof track.dueGuessed !== "boolean") throw new AqError("track.dueGuessed must be true or false");
 }
 
 export function addCandidate(store, candidate, clock) {
@@ -498,6 +557,13 @@ function applyUpdate(store, id, { patch = {}, status, note, internal = false } =
     // Merge, so setting job.followUp never wipes the session id.
     patch = { ...patch, job: { ...(item.job || {}), ...patch.job } };
   }
+  if (patch.track !== undefined) {
+    if (typeof patch.track !== "object" || patch.track === null || Array.isArray(patch.track)) throw new AqError("track must be an object");
+    const bad = Object.keys(patch.track).filter((key) => !internal && !TRACK_MODEL_KEYS.has(key));
+    if (bad.length) throw new AqError(`track.${bad[0]} is managed by dispatch.mjs`);
+    patch = { ...patch, track: { ...(item.track || {}), ...patch.track } };
+    checkTrack(patch.track);
+  }
   const nextStatus = status || patch.status;
   if (nextStatus && !(nextStatus in TRANSITIONS)) throw new AqError(`Unknown status: ${nextStatus}`);
   if (nextStatus && nextStatus !== item.status && !TRANSITIONS[item.status].includes(nextStatus)) {
@@ -572,7 +638,7 @@ export const PRECHECK_VERDICTS = ["needed", "handled", "duplicate", "in-progress
 // Asks that need a pre-check: harvested (not manual or direct), never carded, old enough.
 export function needsPrecheck(item, now, delayMin = 0) {
   if (item.status !== "new" || item.direct || item.card || item.precheck) return false;
-  if (["manual", "direct"].includes(item.source?.kind)) return false;
+  if (OWN_KINDS.includes(item.source?.kind)) return false;
   return now - Date.parse(item.createdAt || 0) >= delayMin * 60_000;
 }
 
@@ -785,23 +851,95 @@ export function routeToCard(store, id, { messages, seenTs = null } = {}, clock, 
   return summarize(store.getItem(id));
 }
 
+// The user's replies on a card (each `route` is one round, one session resume): attention spent.
+export const roundsOf = (item) => (item?.history || []).filter((h) => String(h.note || "").startsWith("user message for the card session")).length;
+
+// A topic label: what the ask was about ("daily-active-users"), reused across asks so repeats show.
+export function slugTopic(text) {
+  const slug = String(text ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/, "");
+  return slug || null;
+}
+
+// facts: the numbers an answer gave, so a later ask re-runs them instead of quoting a stale one.
+function checkFacts(facts) {
+  if (!Array.isArray(facts) || facts.length > 20) throw new AqError("facts must be a list of up to 20 {claim, value, asOf, source}");
+  return facts.map((f, i) => {
+    if (!f || typeof f !== "object" || Array.isArray(f)) throw new AqError(`facts[${i}] must be an object`);
+    const claim = String(f.claim ?? "").trim();
+    const source = String(f.source ?? "").trim();
+    const asOf = String(f.asOf ?? "").trim();
+    if (!claim) throw new AqError(`facts[${i}] needs a claim`);
+    if (f.value === undefined || f.value === null || String(f.value).trim() === "") throw new AqError(`facts[${i}] needs a value`);
+    if (!validDay(asOf.slice(0, 10)) || (asOf.length > 10 && !Number.isFinite(Date.parse(asOf)))) {
+      throw new AqError(`facts[${i}].asOf must be the data's date (2026-11-03) or ISO time`);
+    }
+    if (!source) throw new AqError(`facts[${i}] needs a source (table, dashboard or link)`);
+    return {
+      claim: claim.slice(0, 200),
+      value: typeof f.value === "number" ? f.value : String(f.value).slice(0, 100),
+      asOf,
+      source: source.slice(0, 300),
+      ...(f.query ? { query: String(f.query).slice(0, 300) } : {}),
+    };
+  });
+}
+
 export function addLedger(store, entry, clock) {
-  if (!entry || typeof entry !== "object") throw new AqError("Ledger entry must be a JSON object");
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new AqError("Ledger entry must be a JSON object");
   if (typeof entry.id !== "string") throw new AqError("Ledger entry needs the item id");
   if (!["sent", "skipped", "filtered", "unknown"].includes(entry.outcome)) {
     throw new AqError("Ledger outcome must be sent, skipped, filtered or unknown");
   }
   const record = { at: nowIso(clock), ...entry };
+  if (entry.facts !== undefined) record.facts = checkFacts(entry.facts);
+  if (entry.topic !== undefined) {
+    const topic = slugTopic(entry.topic);
+    if (topic) record.topic = topic;
+    else delete record.topic;
+  }
+  // Unknown is null, never missing: the report tells "not edited" from "never checked".
+  if (record.outcome === "sent" && typeof record.edited !== "boolean") record.edited = null;
+  // Filled from the item by code, so the metrics never depend on the model writing them.
+  let item = null;
+  try {
+    item = store.getItem(entry.id);
+  } catch {
+    // purged or a bad id: nothing to add
+  }
+  if (item) {
+    record.createdAt ??= item.createdAt;
+    record.rounds ??= roundsOf(item);
+    record.sourceKind ??= item.source?.kind || null;
+  }
   store.appendLedger(record);
   return record;
 }
 
-export function findLedger(store, query, limit = 5) {
+const DAY_MS = 86_400_000;
+const daysSince = (iso, now) => {
+  const t = Date.parse(String(iso || "").length === 10 ? `${iso}T00:00:00Z` : iso);
+  return Number.isFinite(t) ? Math.floor((now - t) / DAY_MS) : null;
+};
+
+// Matches, newest first, each with its age; a fact older than answers.staleDays is marked stale.
+export function findLedger(store, query, limit = 5, clock) {
   const terms = String(query || "")
     .toLowerCase()
     .split(/\s+/)
     .filter(Boolean);
   if (terms.length === 0) throw new AqError("ledger find needs a query");
+  const now = (clock ? clock() : new Date()).getTime();
+  let staleDays = 7;
+  try {
+    staleDays = Number(store.config().answers?.staleDays) || 7;
+  } catch {
+    // not initialized: default
+  }
   return store
     .ledgerEntries()
     .filter((entry) => {
@@ -809,7 +947,160 @@ export function findLedger(store, query, limit = 5) {
       return terms.every((term) => haystack.includes(term));
     })
     .reverse()
-    .slice(0, limit);
+    .slice(0, limit)
+    .map((entry) => {
+      const out = { ...entry, ageDays: daysSince(entry.at, now) };
+      if (Array.isArray(entry.facts)) {
+        out.facts = entry.facts.map((fact) => {
+          const age = daysSince(fact.asOf, now);
+          return { ...fact, ageDays: age, stale: age === null || age > staleDays };
+        });
+      }
+      return out;
+    });
+}
+
+// The latest ledger entry per item (a reopened item closes twice).
+function latestEntries(store) {
+  const latest = new Map();
+  for (const entry of store.ledgerEntries()) {
+    latest.delete(entry.id);
+    latest.set(entry.id, entry);
+  }
+  return [...latest.values()];
+}
+
+const median = (list) => {
+  if (!list.length) return null;
+  const s = [...list].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+};
+const rate = (n, d) => (d ? Math.round((n / d) * 100) / 100 : null);
+// Skips the sweep or a card session made because the user had already answered in the source thread.
+const ANSWERED_FIRST = /handled it in the source thread|picked it up/i;
+
+// What the queue did in the last `days` days, from items and the ledger only (no model).
+export function queueReport(store, { days = 7 } = {}, clock) {
+  const n = Number(days);
+  if (!Number.isInteger(n) || n < 1 || n > 90) throw new AqError("--days must be a whole number from 1 to 90 (older data is purged)");
+  const now = (clock ? clock() : new Date()).getTime();
+  const from = now - n * DAY_MS;
+  const within = (iso) => {
+    const t = Date.parse(iso);
+    return Number.isFinite(t) && t >= from && t <= now;
+  };
+  const items = store.allItems();
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const moves = (item) => (item.history || []).filter((h) => h.to && within(h.at));
+
+  const created = items.filter((item) => within(item.createdAt));
+  const own = (item) => item.direct || OWN_KINDS.includes(item.source?.kind);
+  const harvested = created.filter((item) => !own(item) && !item.track);
+  const answeredFirst = items.filter(
+    (item) =>
+      (item.precheck && ["handled", "in-progress"].includes(item.precheck.verdict) && within(item.precheck.at)) ||
+      moves(item).some((h) => h.to === "skipped" && ANSWERED_FIRST.test(h.note || "")),
+  );
+  const types = {};
+  for (const item of harvested) if (item.askType) types[item.askType] = (types[item.askType] || 0) + 1;
+
+  const closed = latestEntries(store).filter((entry) => within(entry.at));
+  const sent = closed.filter((entry) => entry.outcome === "sent");
+  const roundsFor = (entry) => (Number.isInteger(entry.rounds) ? entry.rounds : byId.has(entry.id) ? roundsOf(byId.get(entry.id)) : null);
+  const knownEdit = sent.filter((entry) => typeof entry.edited === "boolean");
+  const guessed = closed.filter((entry) => typeof entry.guessesRight === "boolean");
+  const hours = closed
+    .map((entry) => (Date.parse(entry.at) - Date.parse(entry.createdAt || byId.get(entry.id)?.createdAt)) / 3_600_000)
+    .filter((h) => Number.isFinite(h) && h >= 0);
+  const rounds = closed.map(roundsFor).filter((r) => r !== null);
+  // One tap: sent unedited after at most one reply (the "yes").
+  const oneTap = sent.filter((entry) => entry.edited === false && roundsFor(entry) !== null && roundsFor(entry) <= 1);
+
+  const today = localParts(new Date(now), timezoneOf(store)).date;
+  const tracking = items.filter((item) => item.status === "tracking");
+  const trackMoves = items.filter((item) => item.track).flatMap(moves);
+
+  return {
+    window: { days: n, from: new Date(from).toISOString(), to: new Date(now).toISOString() },
+    asks: {
+      harvested: harvested.length,
+      filtered: harvested.filter((item) => item.history?.[0]?.status === "filtered").length,
+      broughtBack: items.filter((item) => moves(item).some((h) => h.from === "filtered" && h.to === "new")).length,
+      carded: harvested.filter((item) => (item.history || []).some((h) => ["asking", "approving", "scoping", "review"].includes(h.to))).length,
+      youAnsweredFirst: answeredFirst.length,
+      direct: created.filter(own).filter((item) => item.source?.kind !== "report").length,
+      types: Object.fromEntries(Object.entries(types).sort((a, b) => b[1] - a[1]).slice(0, 5)),
+    },
+    closed: {
+      total: closed.length,
+      sent: sent.length,
+      skipped: closed.filter((entry) => entry.outcome === "skipped").length,
+      unknown: closed.filter((entry) => entry.outcome === "unknown").length,
+      oneTap: oneTap.length,
+      oneTapRate: rate(oneTap.length, sent.length),
+      editRate: rate(knownEdit.filter((entry) => entry.edited).length, knownEdit.length),
+      editUnknown: sent.length - knownEdit.length,
+      guessRate: rate(guessed.filter((entry) => entry.guessesRight).length, guessed.length),
+      medianHoursToClose: hours.length ? Math.round(median(hours) * 10) / 10 : null,
+      medianRounds: median(rounds),
+    },
+    tracking: {
+      open: tracking.length,
+      overdue: tracking.filter((item) => item.track?.due < today).length,
+      promises: tracking.filter((item) => item.track?.kind === "promise").length,
+      waiting: tracking.filter((item) => item.track?.kind === "waiting").length,
+      kept: trackMoves.filter((h) => h.to === "done").length,
+      expired: trackMoves.filter((h) => h.to === "skipped" && /^expired/.test(h.note || "")).length,
+    },
+    sessionRuns: items.reduce((sum, item) => sum + (item.history || []).filter((h) => h.note === "worker starting" && within(h.at)).length, 0),
+    repeats: findRepeats(store, {}, clock),
+  };
+}
+
+// Topics asked about at least `min` times by at least `askers` people in `days` days: candidates for
+// a dashboard, a Genie space or a doc. A topic offered in the last 30 days (`repeats --mark`) waits.
+export const REPEAT_COOLDOWN_DAYS = 30;
+export function findRepeats(store, { days = 90, min = 3, askers = 2 } = {}, clock) {
+  const now = (clock ? clock() : new Date()).getTime();
+  const offered = store.state().repeats || {};
+  const groups = new Map();
+  for (const entry of latestEntries(store)) {
+    const topic = slugTopic(entry.topic);
+    const at = Date.parse(entry.at);
+    if (!topic || !Number.isFinite(at) || now - at > days * DAY_MS || at > now) continue;
+    const group = groups.get(topic) || { topic, count: 0, people: new Map(), ids: [], lastAt: null, lastAsk: null };
+    group.count += 1;
+    const who = String(entry.who || "").trim();
+    if (who) group.people.set(who.toLowerCase(), who);
+    group.ids.push(entry.id);
+    if (!group.lastAt || entry.at > group.lastAt) Object.assign(group, { lastAt: entry.at, lastAsk: entry.ask || null });
+    groups.set(topic, group);
+  }
+  return [...groups.values()]
+    .filter((g) => g.count >= min && g.people.size >= askers)
+    .filter((g) => !(offered[g.topic] && now - Date.parse(offered[g.topic].at) < REPEAT_COOLDOWN_DAYS * DAY_MS))
+    .sort((a, b) => b.count - a.count || b.lastAt.localeCompare(a.lastAt))
+    .map(({ people, ...g }) => ({ ...g, askers: [...people.values()] }));
+}
+
+export function markRepeat(store, topic, clock) {
+  const slug = slugTopic(topic);
+  if (!slug) throw new AqError("repeats --mark needs a topic");
+  const state = store.state();
+  state.repeats = { ...(state.repeats || {}), [slug]: { at: nowIso(clock) } };
+  store.saveState(state);
+  return { [slug]: state.repeats[slug] };
+}
+
+// Topic labels in use, most used first, so a closing session reuses one instead of coining a twin.
+export function listTopics(store) {
+  const counts = new Map();
+  for (const entry of latestEntries(store)) {
+    const topic = slugTopic(entry.topic);
+    if (topic) counts.set(topic, (counts.get(topic) || 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 60).map(([topic, count]) => ({ topic, count }));
 }
 
 export function computeStats(store, clock) {
@@ -906,15 +1197,19 @@ function parseValue(raw) {
   }
 }
 
-export function nowInfo(store, clock) {
-  const date = clock ? clock() : new Date();
-  let timezone = null;
+// The configured timezone, else this machine's.
+export function timezoneOf(store) {
   try {
-    timezone = store.config().timezone;
+    const tz = store.config().timezone;
+    if (tz) return tz;
   } catch {
     // config not initialized yet
   }
-  const tz = timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+// Wall-clock parts in a timezone: date "2026-11-06", hour 14, minute, weekday "Fri".
+export function localParts(date, tz) {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat("en-CA", {
       timeZone: tz,
@@ -929,13 +1224,26 @@ export function nowInfo(store, clock) {
       .formatToParts(date)
       .map((part) => [part.type, part.value]),
   );
+  return { date: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour), minute: Number(parts.minute), weekday: parts.weekday };
+}
+
+export function nowInfo(store, clock) {
+  const date = clock ? clock() : new Date();
+  let timezone = null;
+  try {
+    timezone = store.config().timezone;
+  } catch {
+    // config not initialized yet
+  }
+  const tz = timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const local = localParts(date, tz);
   return {
     iso: date.toISOString(),
     epoch: Math.floor(date.getTime() / 1000),
     timezone: tz,
     timezoneConfirmed: Boolean(timezone),
-    local: `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`,
-    weekday: parts.weekday,
+    local: `${local.date} ${String(local.hour).padStart(2, "0")}:${String(local.minute).padStart(2, "0")}`,
+    weekday: local.weekday,
   };
 }
 
@@ -986,6 +1294,9 @@ const USAGE = `usage: aq.mjs <command>
   update <id> [--status s] [--file patch.json] [--note text]
   ledger add --file <entry.json> | ledger find <query> [--limit n]
   stats                                 per-askType outcomes and promotion flags
+  report [--days 7]                     what the queue did: intake, one-tap closes, edits, rounds, promises, repeats
+  repeats [--mark <topic>]              topics asked 3+ times by 2+ people in 90 days / mark one offered (30-day pause)
+  topics                                topic labels in use (reuse one in a ledger entry)
   promote <askType> | demote <askType> | propose <askType> [--ts cardTs] | decline <askType>
   jobs                                  running and queued workers
   stop <id>                             stop a running worker (or un-queue a ready item)
@@ -1070,11 +1381,18 @@ export function run(argv, env = process.env, clock) {
     case "ledger": {
       const [action, ...query] = positional;
       if (action === "add") return addLedger(store, readInputFile(home, flags.file), clock);
-      if (action === "find") return findLedger(store, query.join(" "), Number(flags.limit) || 5);
+      if (action === "find") return findLedger(store, query.join(" "), Number(flags.limit) || 5, clock);
       throw new AqError("usage: ledger add --file f | ledger find <query>");
     }
     case "stats":
       return computeStats(store, clock);
+    case "report":
+      return queueReport(store, { days: flags.days === undefined ? 7 : flags.days === true ? Number.NaN : Number(flags.days) }, clock);
+    case "repeats":
+      if (flags.mark !== undefined) return markRepeat(store, flags.mark === true ? "" : flags.mark, clock);
+      return findRepeats(store, {}, clock);
+    case "topics":
+      return listTopics(store);
     case "promote":
       return setSimple(store, positional[0], true);
     case "demote":

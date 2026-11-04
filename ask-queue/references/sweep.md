@@ -9,6 +9,7 @@ A session costs far more than this run, so a later sweep first checks each ask s
 ## Contents
 1. Window
 2. Harvest (per source)
+2b. Promises and waits (once a day)
 3. Candidate bar
 4. Add and de-duplicate
 5. Pre-check waiting asks
@@ -42,6 +43,29 @@ Only collect asks directed at the user.
 
 Always read the full Slack thread (`slack_read_thread`) around a hit before judging it: the ask is
 often in the parent, and the user may already have answered.
+
+## 2b. Promises and waits (once a day)
+
+Skip this step if `$AQ checkpoint get track:day` is today's date. Otherwise search the user's own
+Slack messages: `from:<@{userId}> after:{day before checkpoint track}` (no checkpoint: the last 2
+days), leaving out the card channel and the self-DM. Keep only:
+
+- **promise**: the user commits to deliver something to a specific person ("I'll send it Friday",
+  "let me check and get back to you"). Not social plans, or something done in the same message.
+- **waiting**: the user asks a specific person for something they need ("can you send me the list?").
+  Not rhetorical or open group questions.
+
+Read each thread once; already delivered or answered: skip. Otherwise `$AQ add` with `"status":
+"tracking"`, fingerprint `promise:{channelId}:{ts}` or `waiting:{channelId}:{ts}`, `source.who` = the
+other person, `title` = the thing itself ("Q3 export numbers for Sam"), `excerpt` = the user's words,
+and `track` = `{"kind": …, "due": "YYYY-MM-DD", "dueGuessed": …}`. `due` is the date they named; none:
+2 working days later for a promise, 3 for a wait, with `dueGuessed: true`. Match `## Filters` too.
+
+Then check the open ones (`$AQ list --status tracking`, at most 15, earliest due first): read the
+thread after the item's `ts`. Delivered or answered: `$AQ update AQ-n --status done --note "kept:
+<one line>"`, and if it has a card, say so in its thread. Post nothing else: dispatch.mjs posts the
+reminder card when one is due. Finish with `$AQ checkpoint set track <sweepStartedAt>` and
+`$AQ checkpoint set track:day <today's date>`.
 
 ## 3. Candidate bar
 

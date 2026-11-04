@@ -159,6 +159,40 @@ Short, one line where possible: `🤖 <icon> **AQ-n · <what happened>**` then t
   run's own `Started:` and result messages / `🤖 ℹ️ **AQ-21 ·** <notice>` for session notices
   (work.md).
 
+## Reminder card (posted by dispatch.mjs, no model)
+
+When a promise or wait is due, code posts it as the item's card, so a reply goes to a session.
+Waits read `Still waiting on Sam: …` and `You asked Sam`.
+
+```
+🤖 ⏰ **AQ-31 · Due today: Q3 export numbers for Sam**
+from [Sam Lee · #eng-platform](https://…)
+
+💬 **You told Sam**
+> I'll send the Q3 numbers by Friday
+
+⠀
+👉 Reply **done**, a new date, **drop**, or ask me to draft it.
+━━━━━━━━━━━━━━━━
+```
+
+## Weekly report card (card-session.md section 7)
+
+```
+🤖 📊 **AQ-40 · Your week in the queue**
+
+📊 **This week**
+• 12 asks in, 7 filtered · you answered 3 before their card came
+• 4 closed: 2 in one tap (50%), 1 edited · median 1 reply each
+• Promises: 3 kept, 1 overdue (AQ-31)
+
+🔁 **Asked again and again**
+• **daily-active-users**: 4 asks from Sam, Priya. Ticket: _Self-serve daily active users tile_
+
+📈 [Dashboard](https://claude.ai/…) updated.
+━━━━━━━━━━━━━━━━
+```
+
 ## Filtered digest (one per sweep, only when something was filtered)
 
 ```
@@ -195,6 +229,8 @@ Your last 5 went out unedited. I can skip the questions for these from now on.
 🔵 **Scoping:** AQ-25
 🟣 **Working:** AQ-21, AQ-23 · queued: AQ-24
 🟠 **To review:** AQ-19
+
+📌 **Promises:** AQ-31 (due Fri) · **Waiting on:** AQ-33 (Asim)
 ━━━━━━━━━━━━━━━━
 ```
 
