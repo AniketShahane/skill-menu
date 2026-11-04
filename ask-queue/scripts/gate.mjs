@@ -325,18 +325,24 @@ function legacyDue(home, inbox, now) {
   return (inbox.legacy || []).length > 0 && fallbackDue(home, "replies", now);
 }
 
+// Sources the Haiku probe can check (bot token only).
+const PROBED = ["slack", "gmail", "zoom"];
 const dayBefore = (iso) => new Date(Date.parse(iso) - 24 * 3600 * 1000).toISOString().slice(0, 10);
 
 export async function sweepNeeded(store, call, clock, probeImpl = haikuProbe) {
   const config = store.config();
   const state = store.state();
   const now = (clock ? clock() : new Date()).getTime();
-  const others = Object.entries(config.sources || {})
-    .filter(([name, on]) => on && name !== "slack")
+  const enabled = Object.entries(config.sources || {})
+    .filter(([, on]) => on)
     .map(([name]) => name);
+  const probed = enabled.filter((name) => PROBED.includes(name));
+  // The probe covers Slack, Gmail and Zoom for a bot token; anything else needs Claude every time.
+  const others = enabled.filter((name) => !(call.isBot ? PROBED : ["slack"]).includes(name));
   if (others.length) return { run: true, reason: `${others.join(", ")} can only be checked by Claude` };
   const since = state.checkpoints.slack;
-  if (!since) return { run: true, reason: "first sweep" };
+  const fresh = probed.filter((name) => !state.checkpoints[name]);
+  if (fresh.length) return { run: true, reason: `first sweep for ${fresh.join(", ")}` };
   const delay = Number(workerConfig(store).prepDelayMin) || 0;
   const waiting = store.allItems().filter((item) => needsPrecheck(item, now, delay)).map((item) => item.id);
   if (waiting.length) return { run: true, reason: `pre-check before a session starts: ${waiting.join(", ")}` };
@@ -347,15 +353,27 @@ export async function sweepNeeded(store, call, clock, probeImpl = haikuProbe) {
   }
 
   const { userId, selfDmId } = config.slack;
-  // A bot token can't search Slack: a lean Haiku run searches through the claude.ai connector
-  // instead (probe.mjs). Any doubt there means "run"; a failed probe throws (fixed schedule).
+  // A bot token can't search Slack: a lean Haiku run searches Slack, Gmail and Zoom through the
+  // claude.ai connectors instead (probe.mjs). Any doubt means "run"; a failed probe throws
+  // (fixed schedule).
   if (call.isBot) {
     if (config.gate?.probe === "off") throw new Error("a bot token can't search Slack");
-    const after = Date.parse(since) / 1000;
-    const result = await probeImpl({ userId, after, ignoreChannels: [selfDmId, cardChannel(config)] });
+    const home = path.dirname(store.paths.config);
+    const gateState = readGateState(home);
+    const sources = Object.fromEntries(
+      probed.map((name) => [name, { after: Date.parse(state.checkpoints[name]) / 1000, seen: gateState.zoomSeen || [] }]),
+    );
+    const result = await probeImpl({ userId, sources, ignoreChannels: [selfDmId, cardChannel(config)] });
     const cost = result.cost == null ? "" : ` (probe $${result.cost.toFixed(4)})`;
+    // A Zoom summary wakes the sweep once; the sweep looks back 3 hours, so a failed run still gets it.
+    const zoom = (result.hits || []).filter((h) => h.source === "zoom").map((h) => h.uuid);
+    if (result.run && zoom.length) {
+      const latest = readGateState(home);
+      latest.zoomSeen = [...new Set([...(latest.zoomSeen || []), ...zoom])].slice(-200);
+      fs.writeFileSync(path.join(home, "gate.json"), `${JSON.stringify(latest, null, 2)}\n`);
+    }
     // `seen` goes into the run log, so a later card can be traced to the check that woke Sonnet.
-    const seen = (result.hits || []).map((h) => `slack:${h.channel}:${h.ts}`);
+    const seen = (result.hits || []).map((h) => h.key);
     return { run: result.run, reason: `${result.reason}${cost}`, ...(seen.length ? { seen } : {}) };
   }
   // One hit is enough to decide, so a single page per query is fine here.

@@ -20,20 +20,25 @@ A session costs far more than this run, so a later sweep first checks each ask s
 - `$AQ now` → record `sweepStartedAt` (its `iso`) BEFORE harvesting, so asks that arrive mid-sweep
   land in the next window.
 - For each enabled source in `config.sources`: `$AQ checkpoint get <source>`. Harvest strictly after
-  it. No checkpoint (first run): start of today in `config.timezone`. Never scan unbounded.
+  it. No checkpoint (first run): start of today in `config.timezone`; a missing checkpoint is never
+  a reason to skip a source. Never scan unbounded.
 - Querying from 10 minutes before the checkpoint is fine: fingerprints make overlaps harmless.
 
 ## 2. Harvest
 
-Load tools with `ToolSearch` first when they are deferred. A source whose tools are missing, or that
-errors, is skipped for this run (see step 7 for alerting). Only collect asks directed at the user.
+Harvest every enabled source on every sweep. Load tools with `ToolSearch` first when they are
+deferred: Slack `select:mcp__claude_ai_Slack__slack_search_public_and_private,mcp__claude_ai_Slack__slack_read_thread`,
+Gmail `select:mcp__claude_ai_Gmail__search_threads,mcp__claude_ai_Gmail__get_thread`, Zoom
+`select:mcp__claude_ai_Zoom_for_Claude__search_meetings,mcp__claude_ai_Zoom_for_Claude__get_meeting_assets`.
+A source is skipped only when that load finds no tools, or a call errors (see step 7 for alerting).
+Only collect asks directed at the user.
 
 | Source | What to pull | Fingerprint |
 |---|---|---|
 | Slack | DMs to the user: `slack_search_public_and_private` query `to:<@{userId}> after:{day-before-checkpoint}`. Mentions: query `<@{userId}> after:{…}`. Keep messages with `ts` after the checkpoint, not from the user, not in the self-DM. | `slack:{channelId}:{ts}` |
 | Jira | Newly assigned: `assignee = "{accountId}" AND (created >= "{since}" OR assignee CHANGED TO "{accountId}" AFTER "{since}")`. Comments: `(assignee = "{accountId}" OR reporter = "{accountId}" OR watcher = "{accountId}") AND updated >= "{since}"`, then `getJiraIssue` and keep comments after the checkpoint, by others, that mention or ask the user. Use `searchJiraIssuesUsingJql` with `config.jira.cloudId`; add `AND project IN (…)` when `config.jira.projects` is set. `{since}` is `yyyy/MM/dd HH:mm` in `config.timezone`. | `jira:{KEY}:assigned`, `jira:{KEY}:comment:{commentId}` |
-| Zoom | `ToolSearch` query `zoom`. If only authenticate tools appear, skip (needs an interactive login). Meetings that ended after the checkpoint: read the AI summary / next steps; keep action items owned by the user. | `zoom:{meetingId}:{action-slug}` |
-| Gmail | `search_threads` query `in:inbox after:{checkpointEpochSeconds} -from:me -category:promotions -category:social -category:updates -category:forums`; `get_thread` on likely asks. Keep messages with the user in To (not only CC or a list). | `gmail:{messageId}` |
+| Zoom | Load the Zoom tools as above; if only authenticate tools exist, skip (needs an interactive login). `search_meetings` with `from` = 3 hours before the checkpoint (AI summaries can appear well after a meeting ends) and `to` = now, both UTC; the time zone is `config.timezone`. Meetings with `meeting_category` `history` and `has_summary` true: `get_meeting_assets` with the `meeting_uuid`, read the summary / next steps; keep action items owned by the user. Fingerprints make the overlap harmless. (`search` with the `zoom_meeting` datasource is blocked here.) | `zoom:{meetingUuid}:{action-slug}` |
+| Gmail | `search_threads` query `in:inbox after:{yyyy/MM/dd of the day before the checkpoint} -from:me -category:promotions -category:social -category:updates -category:forums`. Use a date: an epoch `after:` silently matches nothing. Then keep only threads whose newest message is after the checkpoint (`get_thread`, or the message id: hex id >> 20 is its arrival time in ms). `get_thread` on likely asks. Keep messages with the user in To (not only CC or a list). | `gmail:{messageId}` |
 
 Always read the full Slack thread (`slack_read_thread`) around a hit before judging it: the ask is
 often in the parent, and the user may already have answered.
