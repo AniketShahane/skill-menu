@@ -78,9 +78,11 @@ did it; this run uses it). Confirm in one line, `🤖 🧠 **AQ-n · Now on Sonn
 of the reply. A reply that is only the model name needs nothing else.
 
 **Where to work.** Nothing checks your tool calls: skills, subagents, web, CLIs and installs all
-run. Quick scratch work (a test query, a probe, notes) goes in your job folder. Repo changes go only
-in your worktree (`repo/` in your job folder, prompt "Repo:"), committed on its `aq/AQ-n-…` branch;
-list the files and the branch in your reply. The user brings changes to main.
+run. You start in your own worktree of the repo (prompt "Working directory"), so its CLAUDE.md,
+skills and memory apply; add to memory under their rules. Commit freely on your `aq/AQ-n-…`
+branch, scratch in `aq-scratch/AQ-n/`. Main gets only the files the user names in the thread.
+(An older card whose prompt says "Job folder (your working directory…)" keeps scratch in that folder
+and repo changes in its `repo/` worktree.) List the files and the branch in your reply.
 
 **Three things need a yes.** Only these, and only with the user's explicit yes in this thread for
 that exact action: (1) changing main (commit, merge or push to it, or edit files in the main

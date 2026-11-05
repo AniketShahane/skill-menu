@@ -41,11 +41,16 @@ Write to `tmp/ledger-AQ-n.json`, then `$AQ ledger add --file tmp/ledger-AQ-n.jso
   "outcome": "sent",
   "artifacts": [{ "kind": "slack-draft", "url": "https://…" }],
   "lessons": ["Q3 numbers → Finance's live sheet"],
+  "did": "Found the live sheet and drafted the reply with the Q3 number",
+  "wrongTurns": ["Looked in the old export folder before asking which sheet"],
+  "nextTime": "Ask Finance's live sheet first for export numbers",
   "topic": "q3-export-numbers",
   "facts": [{ "claim": "Q3 export volume", "value": "4.2M", "asOf": "2026-09-30",
               "source": "Finance live sheet, Q3 tab", "query": "jobs/AQ-12/work/q3.sql" }]
 }
 ```
+
+did, wrongTurns and nextTime go into the card's record (records.mjs): one short line each, honest about redirects.
 
 `outcome` is `sent`, `skipped`, `filtered` or `unknown`. `edited` is true, false, or null when you
 couldn't check. `editSummary` says in one line what the user changed ("cut the greeting, added the

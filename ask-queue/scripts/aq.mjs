@@ -66,12 +66,30 @@ export const STOP_WORDS = /^\s*(stop|stop it|stop that|cancel|cancel that|hold o
 // a file the user described loosely is proposed by the session (job.repoProposed) and allowed by the
 // user's next reply if it is a yes. Any other reply drops the proposal. Files live under
 // config.repoEdit.roots; secrets never count.
+// Never committed by code (backups, a card's leftovers at close), whatever .gitignore says.
+export const SECRET_GLOBS = ["**/.env", "**/.env.*", "**/*.env", "**/.databricks-*", "**/credentials*", "**/*.credentials", "**/*.pem", "**/*.key"];
 export const SECRET_FILE = /(^|\/)(\.env[^/]*|[^/]*\.env|credentials[^/]*|\.databricks-[^/]*)$/i;
 export const APPROVE_WORDS = /^\s*(yes|yep|yeah|y|ok|okay|sure|approved?|go ahead|do it|lgtm)\b/i;
 
 export function repoRoots(config) {
-  const roots = config?.repoEdit?.roots;
-  return Array.isArray(roots) ? roots.filter((r) => typeof r === "string" && path.isAbsolute(r)).map((r) => path.resolve(r)) : [];
+  const roots = [config?.repo, ...(Array.isArray(config?.repoEdit?.roots) ? config.repoEdit.roots : [])];
+  return [...new Set(roots.filter((r) => typeof r === "string" && path.isAbsolute(r)).map((r) => path.resolve(r)))];
+}
+
+// The repo cards work in (config.repo; older setups: the first repoEdit root). Every card session
+// runs in its own worktree of it, so it loads that repo's CLAUDE.md, skills and memory.
+export function homeRepo(config) {
+  return repoRoots(config)[0] || null;
+}
+
+// Card records (dispatch.mjs closeOut): written to <repo>/<dir>/<YYYY-MM>/AQ-n.md and committed to
+// <branch> once a day, keepDays after a card closes. Until then the card keeps its session and worktree.
+// since (an ISO date): cards closed before it get a record only if they still have a worktree.
+export const RECORD_DEFAULTS = { dir: "ask-queue-records", branch: "main", keepDays: 7, since: null };
+export function recordsConfig(config) {
+  const r = { ...RECORD_DEFAULTS, ...(config?.records || {}) };
+  const keepDays = Number(r.keepDays);
+  return { ...r, keepDays: Number.isFinite(keepDays) && keepDays >= 0 ? keepDays : RECORD_DEFAULTS.keepDays };
 }
 
 const inside = (target, dir) => {
@@ -219,6 +237,10 @@ const DEFAULT_CONFIG = {
   // gate.mjs: force a full sweep after this many quiet hours (reconcile drafts, learn).
   gate: { maxQuietHours: 6 },
   workers: {},
+  // The repo every card works in: each card gets its own worktree of it (null: no worktree).
+  repo: null,
+  // Card records in that repo (dispatch.mjs closeOut): folder, branch they're committed to, days kept after close.
+  records: { ...RECORD_DEFAULTS },
   // Folders whose files a card session may edit once the user allows each file (empty: never).
   repoEdit: { roots: [] },
   // Weekly report card for the user (dispatch.mjs): local weekday and hour.

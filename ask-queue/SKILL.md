@@ -30,6 +30,7 @@ replies (every 2m)   catch-up: card-thread replies go straight to their session 
 tick (every 2m)      dispatch.mjs, no Claude: starts sessions; posts a reminder card for each promise
                      or wait that is due; makes the weekly report card (config report); closes
                      promises nobody answered 14 days past due
+close-out (daily)    dispatch.mjs, no Claude: 7 days after a card closes ─▶ record in the repo ─▶ worktree removed
 ```
 
 Every card has its own Claude session (card-session.md). A session costs far more than a check, so

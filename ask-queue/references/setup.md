@@ -101,15 +101,24 @@ Change one with `$AQ config set workers.max 3`. Sweep and replies runs use `conf
 sonnet). A model name (`opus`, `sonnet`, `haiku`) in any card reply switches that card's sessions to
 it until changed; the card shows its model on a 🧠 line. A card session reacts 👀 to each of your
 card-thread messages when it reads them. A closed
-card keeps its session for 48 hours.
+card keeps its session for 7 days.
 
-Repos: `$AQ config set repoEdit.roots '["/path/to/repo"]'`. Every card then gets its own git
-worktree of the first root at `jobs/AQ-n/work/repo`, on a local branch `aq/AQ-n-…`. Before the
+Repo: `$AQ config set repo /path/to/repo`. Every card gets its own git worktree of it at
+`jobs/AQ-n/work/repo`, on a local branch `aq/AQ-n-…`, and its session starts there, so it loads
+that repo's CLAUDE.md, skills and memory. Add this line to that repo's CLAUDE.md:
+`- In an ask-queue card session (your own `aq/` worktree), the card thread is the chat: commit freely on that branch, keep scratch in `aq-scratch/`, and bring to main only the files the user names there.`
+Before the
 worktree is made, the repo as it is (committed, changed and new files; `.gitignore`d files, secrets
 and new files over 20 MB left out) is saved as one commit on top of the rolling `aq-backup` branch
 and pushed to origin. Main, the index and your files are not touched, and nothing changed means no
 new commit. The worktree starts from that snapshot, so `git diff <job.base> aq/AQ-n-…` shows only
-the session's changes. Bring them to main yourself, then `git worktree remove` and delete the branch.
+the session's changes. Bring them to main yourself.
+
+A closed card keeps its session and worktree for `records.keepDays` (7). Then its record goes to
+`<repo>/<records.dir>/<YYYY-MM>/AQ-n.md`, leftovers are committed on its branch, and the worktree
+is removed. Records are committed to `records.branch` once a day, never pushed. Set them with
+`$AQ config set records '{"dir":"ask-queue-records","branch":"main","keepDays":7,"since":"<today>"}'`
+(`since`: cards closed before it get a record only if they still have a worktree).
 
 Runs never overlap (the second one exits when the first holds the lock). Skipped checks log one line. Logs:
 `~/.local/share/ask-queue/logs/`.

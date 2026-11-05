@@ -343,16 +343,16 @@ test("guard: sessions write memory notes but not their own settings", () => {
   assert.equal(write(path.join(home, "items", `${id}.json`)).decision, "deny");
 });
 
-test("dispatch: a closed card keeps its session for 48 hours, then a reopen starts fresh", () => {
+test("dispatch: a closed card keeps its session for records.keepDays (7), then a reopen starts fresh", () => {
   const { home, store } = makeHome();
   const id = addItem(store);
   setStatus(store, id, "asking");
   withCard(store, id);
   updateItem(store, id, { patch: { job: { sessionId: "S1", sessionStarted: true } }, internal: true });
   setStatus(store, id, "skipped");
-  const soon = tick({ home, spawnSupervisor: noSpawn, clock: () => new Date(Date.now() + 47 * 3600 * 1000) });
+  const soon = tick({ home, spawnSupervisor: noSpawn, clock: () => new Date(Date.now() + 6.9 * 86_400_000) });
   assert.deepEqual(soon.expired, []);
-  const later = tick({ home, spawnSupervisor: noSpawn, clock: () => new Date(Date.now() + 49 * 3600 * 1000) });
+  const later = tick({ home, spawnSupervisor: noSpawn, clock: () => new Date(Date.now() + 7.1 * 86_400_000) });
   assert.deepEqual(later.expired, [id]);
   const item = store.getItem(id);
   assert.equal(item.job.sessionId, null);

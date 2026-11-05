@@ -10,9 +10,12 @@
 // Every card has one Claude session for its whole life: the first run preps the ask
 // and posts the card; every reply in the card thread, and the work after "go", resumes it (--resume).
 // A session is a background `claude --bg` named "AQ-n · <title>" (so it shows in Claude Code's agent
-// view), with no permission checks (bypassPermissions; guard.mjs is off for now), always started in
-// <home>/jobs/AQ-n/work (resume needs the same folder). Every card gets a git worktree on branch
-// aq/AQ-n-…, started from an aq-backup snapshot, at work/repo. Card runs (kind card) and work runs (kind work) have separate limits.
+// view), with no permission checks (bypassPermissions; guard.mjs is off for now). Every card gets a
+// git worktree of config.repo on branch aq/AQ-n-…, started from an aq-backup snapshot, at work/repo,
+// and its session starts inside it (job.cwd), so it loads that repo's CLAUDE.md, skills and memory.
+// Resume needs the same folder: sessions started before this keep <home>/jobs/AQ-n/work.
+// Card runs (kind card) and work runs (kind work) have separate limits. A closed card keeps its
+// session and worktree for records.keepDays, then records.mjs closeOut writes its record and removes the worktree.
 
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -21,11 +24,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  AFTER_CLOSE_WATCH_MS,
   CARD_BRIEF,
   DIRECT_BRIEF,
   OWN_KINDS,
   REPORT_BRIEF,
+  SECRET_GLOBS,
   SKILL_DIR,
   TRANSITIONS,
   addCandidate,
@@ -33,8 +36,10 @@ import {
   createStore,
   enteredStatusAt,
   headlessSettings,
+  homeRepo,
   listJobs,
   localParts,
+  recordsConfig,
   repoRoots,
   resolveHome,
   timezoneOf,
@@ -42,6 +47,7 @@ import {
   validDay,
   workerConfig,
 } from "./aq.mjs";
+import { SCRATCH_DIR, closeOut } from "./records.mjs";
 import { botPost, loadToken } from "./slack.mjs";
 
 const pollMs = () => Number(process.env.ASK_QUEUE_POLL_MS) || 5000;
@@ -134,9 +140,7 @@ function slug(text) {
 const BG_MODE = "bypassPermissions";
 export const BACKUP_BRANCH = "aq-backup";
 // Kept out of backups, whatever .gitignore says: secrets, and new files too big for a git push.
-const BACKUP_EXCLUDES = ["**/.env", "**/.env.*", "**/*.env", "**/.databricks-*", "**/credentials*", "**/*.credentials", "**/*.pem", "**/*.key"].map(
-  (glob) => `:(exclude,glob)${glob}`,
-);
+const BACKUP_EXCLUDES = SECRET_GLOBS.map((glob) => `:(exclude,glob)${glob}`);
 const BACKUP_MAX_NEW_FILE = 20 * 1024 * 1024;
 
 // Saves the repo as it is right now (committed, changed and new files) as one commit on top of the
@@ -184,16 +188,16 @@ export function snapshotRepo(repo, label) {
   return { sha, pushed };
 }
 
-// Job folder + workspace. The session always runs in work/ (resume finds sessions by folder).
-// Every card gets a worktree of the repo (job.repo, else the first repoEdit root) at work/repo, on
-// a new local branch started from a fresh aq-backup snapshot; only aq-backup is ever pushed.
+// Job folder + workspace. Every card gets a worktree of the repo (job.repo, else config.repo) at
+// work/repo, on a new local branch started from a fresh aq-backup snapshot; only aq-backup is ever
+// pushed. A worktree removed at close is rebuilt from its branch when the card runs again.
 export function prepareWorkspace(home, item, config = {}) {
   const jobDir = path.join(home, "jobs", item.id);
   const workDir = path.join(jobDir, "work");
   fs.mkdirSync(workDir, { recursive: true });
   const job = { dir: jobDir, workDir };
   const repoDir = path.join(workDir, "repo");
-  const source = item.job.repo || repoRoots(config)[0];
+  const source = item.job.repo || homeRepo(config);
   if (source && !fs.existsSync(repoDir)) {
     const repo = path.resolve(source);
     const branch = `aq/${item.id}-${slug(item.title)}`;
@@ -340,14 +344,15 @@ export function purgeOld(store, now, { days = RETENTION_DAYS, force = false } = 
   return result;
 }
 
-// Closed cards keep their session for 48 hours (follow-ups resume it). After that, a reopened card
-// starts a fresh session.
+// Closed cards keep their session for records.keepDays (follow-ups resume it). After that, a
+// reopened card starts a fresh session, which reads the card's record.
 function expireSessions(store, now) {
   const expired = [];
+  const keepMs = recordsConfig(store.config()).keepDays * 86_400_000;
   for (const item of store.allItems()) {
     if (!["done", "skipped", "filtered"].includes(item.status)) continue;
     if (!item.job?.sessionId || item.job.sessionExpired) continue;
-    if (now - Date.parse(enteredStatusAt(item)) < AFTER_CLOSE_WATCH_MS) continue;
+    if (now - Date.parse(enteredStatusAt(item)) < keepMs) continue;
     patchJob(store, item.id, { sessionExpired: now.toISOString(), previousSessionId: item.job.sessionId, sessionId: null, sessionStarted: false });
     expired.push(item.id);
   }
@@ -541,6 +546,14 @@ export function tick({ home = resolveHome(), clock, spawnSupervisor = defaultSpa
     } catch (err) {
       result.purgeError = err.message;
     }
+    try {
+      const closed = closeOut(store, now);
+      if (closed && (closed.recorded.length || closed.removed.length || closed.kept.length || closed.errors.length || closed.commit?.committed)) {
+        result.closedOut = closed;
+      }
+    } catch (err) {
+      result.closeOutError = err.message;
+    }
     // Scheduled cards and expiry never block starting sessions.
     try {
       const report = scheduleReport(store, now);
@@ -569,10 +582,13 @@ export function tick({ home = resolveHome(), clock, spawnSupervisor = defaultSpa
       }
       try {
         const workspace = prepareWorkspace(home, item, store.config());
+        // A new session starts in the card's worktree; a resumed one stays where it began.
+        const fresh = !(item.job.sessionStarted && item.job.sessionId);
+        const cwd = fresh ? workspace.repoDir || workspace.workDir : item.job.cwd || workspace.workDir;
         patchJob(
           store,
           id,
-          { ...workspace, kind: item.job.kind || "card", sessionId: item.job.sessionId || randomUUID(), startedAt: now.toISOString(), pid: null, runs: (item.job.runs || 0) + 1 },
+          { ...workspace, cwd, kind: item.job.kind || "card", sessionId: item.job.sessionId || randomUUID(), startedAt: now.toISOString(), pid: null, runs: (item.job.runs || 0) + 1 },
           { status: "working", note: "worker starting" },
         );
         spawnSupervisor(home, id);
@@ -621,11 +637,21 @@ This run uses ${model}: say so on the card (cards.md). If the user's new message
   } else {
     post = `No card yet: post the card as ONE top-level message to channel ${selfDm} (no thread_ts), then record it with update (card.channelId, card.ts, card.lastSeenTs). After that, post only in its thread.`;
   }
-  const main = job.repo || repoRoots(config)[0];
-  const repo = job.repoDir
-    ? `\nRepo: your own git worktree of ${main} at ${job.repoDir}, branch ${job.branch}${job.base ? `, started from backup snapshot ${job.base.slice(0, 10)}` : ""}. Make every repo change there and commit it on that branch; the user brings it to main.`
-    : "";
-  const where = `Job folder (your working directory; scratch work, queries and --file inputs go here): ${job.workDir}${repo}
+  const main = job.repo || homeRepo(config);
+  const snapshot = job.base ? `, started from backup snapshot ${job.base.slice(0, 10)}` : "";
+  const inWorktree = Boolean(job.repoDir) && job.cwd === job.repoDir;
+  let place;
+  if (inWorktree) {
+    place = `Working directory: your own git worktree of ${main} at ${job.repoDir}, branch ${job.branch}${snapshot}. It loads that repo's CLAUDE.md, skills and memory: follow them, and add to memory under their rules. Commit freely on your branch. Scratch (queries, notes, --file inputs) goes in ${path.join(job.repoDir, SCRATCH_DIR, item.id)}. Main gets only the files the user names in this thread, copied over: never ${SCRATCH_DIR}/ and never a merge of your branch. Job folder (run logs): ${job.dir}`;
+  } else {
+    const repo = job.repoDir
+      ? `\nRepo: your own git worktree of ${main} at ${job.repoDir}, branch ${job.branch}${snapshot}. Make every repo change there and commit it on that branch; the user brings it to main.`
+      : "";
+    place = `Job folder (your working directory; scratch work, queries and --file inputs go here): ${job.workDir}${repo}`;
+  }
+  const record = job.recordPath && !job.sessionStarted ? `\nThis card was closed before and written up in ${job.recordPath}: read it first.` : "";
+  const where = `${place}${record}
+When you close this card, its ledger entry also gets did, wrongTurns and nextTime (references/learn.md section 2): they go in its record.
 No permission checks: you may run anything. Three things need the user's explicit yes in the card thread first, for that exact action (references/card-session.md "Three things need a yes"):
 1. Changing main: committing, merging or pushing to main, or editing files in the main checkout${main ? ` (${main})` : ""}.
 2. Sending anything as the user to other people (Slack outside your card thread, email, invites). Draft it instead.
@@ -770,7 +796,9 @@ export async function execJob(id, { home = resolveHome(), claudeBin = process.en
   const prompt = workerPrompt(home, item, store.config(), limits.model);
   if (kind === "work" && !item.job.workStarted) patchJob(store, id, { workStarted: new Date().toISOString() });
 
-  const opts = { cwd: item.job.workDir, env: { ...process.env, ASK_QUEUE_HOME: home, ASK_QUEUE_JOB: id } };
+  const cwd = item.job.cwd || item.job.workDir;
+  const inWorktree = Boolean(item.job.repoDir) && cwd === item.job.repoDir;
+  const opts = { cwd, env: { ...process.env, ASK_QUEUE_HOME: home, ASK_QUEUE_JOB: id } };
   const resume = item.job.sessionStarted && item.job.sessionId;
   // A background session keeps the options it was started with. Passing new ones (a card session
   // turning into a work run, or a new model) starts a copy with the full history under a new id.
@@ -792,15 +820,17 @@ export async function execJob(id, { home = resolveHome(), claudeBin = process.en
         settingsFile(home, id),
         "--add-dir",
         SKILL_DIR,
-        // The repos' skills load from here.
-        ...repoRoots(store.config()).flatMap((root) => ["--add-dir", root]),
+        // In its worktree the session loads the repo's skills itself; the main checkout would load them twice.
+        ...(inWorktree ? [] : repoRoots(store.config()).flatMap((root) => ["--add-dir", root])),
         ...(resume ? ["--resume", item.job.sessionId] : []),
         "--", // the list flags above would otherwise take the prompt as one more value
         prompt,
       ];
   const logFile = path.join(item.job.dir, "log.txt");
   const log = (line) => fs.appendFileSync(logFile, `=== ${new Date().toISOString()} ${line}\n`);
-  log(`run ${item.job.runs} ${kind} ${resume ? `resume session ${item.job.sessionId}` : "new session"}`);
+  log(`run ${item.job.runs} ${kind} ${limits.model} ${resume ? `resume session ${item.job.sessionId}` : "new session"}`);
+  // Each run's model, for the card's record (records.mjs).
+  patchJob(store, id, { runLog: [...(item.job.runLog || []), { at: new Date().toISOString(), kind, model: limits.model }] });
 
   if (item.job.bgId) bgStop(claudeBin, opts, item.job.bgId); // a session still running would be copied, not resumed
   let bgId = null;
@@ -824,7 +854,11 @@ export async function execJob(id, { home = resolveHome(), claudeBin = process.en
   for (;;) {
     await new Promise((resolve) => setTimeout(resolve, pollMs()));
     const entry = bgEntry(claudeBin, opts, bgId);
-    if (entry?.sessionId && entry.sessionId !== store.getItem(id).job.sessionId) patchJob(store, id, { sessionId: entry.sessionId });
+    if (entry?.sessionId && entry.sessionId !== store.getItem(id).job.sessionId) {
+      // Every id the card's sessions had: the record finds the memories they wrote by it.
+      const ids = store.getItem(id).job.sessionIds || [];
+      patchJob(store, id, { sessionId: entry.sessionId, sessionIds: [...new Set([...ids, entry.sessionId])] });
+    }
     if (entry === null && (missing += 1) >= 3) {
       code = 1;
       log("session no longer listed");
