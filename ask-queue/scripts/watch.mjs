@@ -16,7 +16,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SKILL_DIR, addDirect, compareTs, createStore, resolveHome, routeToCard } from "./aq.mjs";
-import { tick } from "./dispatch.mjs";
 import { loadAppToken, logEvent } from "./slack.mjs";
 
 // Per minute; past this, messages wait for the 2-minute replies check (rate limit, loop guard).
@@ -26,7 +25,7 @@ const REPLIES_DEBOUNCE_MS = 60_000;
 
 const log = (line) => process.stdout.write(`${new Date().toISOString()} ${line}\n`);
 
-export function createHandler({ home, clock, runTick = (h) => tick({ home: h }), runReplies = defaultReplies } = {}) {
+export function createHandler({ home, clock, runTick = defaultTick, runReplies = defaultReplies } = {}) {
   const seen = [];
   const recent = [];
   let lastReplies = 0;
@@ -112,6 +111,28 @@ export function createHandler({ home, clock, runTick = (h) => tick({ home: h }),
   };
 }
 
+// A fresh process each time, so a new card always starts under the code on disk, not the code this
+// long-lived watcher loaded when it booted.
+function defaultTick(home) {
+  const child = spawn(process.execPath, [path.join(SKILL_DIR, "scripts", "dispatch.mjs"), "tick"], {
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env, ASK_QUEUE_HOME: home },
+  });
+  child.unref();
+}
+
+// The skill's scripts as they were when this watcher started. When any changes (a sync or install),
+// the watcher exits and cron's watch.sh starts it again within a minute, under the new code.
+export function codeStamp(dir = path.join(SKILL_DIR, "scripts")) {
+  return fs
+    .readdirSync(dir)
+    .filter((name) => name.endsWith(".mjs"))
+    .sort()
+    .map((name) => `${name}:${fs.statSync(path.join(dir, name)).mtimeMs}`)
+    .join("|");
+}
+
 function defaultReplies(home, why) {
   const child = spawn(path.join(SKILL_DIR, "scripts", "run.sh"), ["replies"], {
     detached: true,
@@ -182,6 +203,12 @@ async function main() {
     process.exit(1);
   }
   const handle = createHandler({ home });
+  const stamp = codeStamp();
+  setInterval(() => {
+    if (codeStamp() === stamp) return;
+    log("skill code changed: exiting so watch.sh restarts the watcher under it");
+    process.exit(0);
+  }, 30_000).unref();
   let backoff = 1000;
   for (;;) {
     try {

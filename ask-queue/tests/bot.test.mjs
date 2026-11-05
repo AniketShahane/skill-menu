@@ -320,3 +320,15 @@ test("purge: closed items older than 90 days lose item, job folder and artifacts
   const { id: next } = addCandidate(store, { title: "new", source: { kind: "slack" }, fingerprints: ["d"] }, clock);
   assert.equal(next, "AQ-4");
 });
+
+test("watcher: the code stamp changes when a script changes, so the watcher restarts under new code", async () => {
+  const { codeStamp } = await import("../scripts/watch.mjs");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aq-stamp-"));
+  fs.writeFileSync(path.join(dir, "a.mjs"), "1");
+  fs.writeFileSync(path.join(dir, "notes.md"), "x");
+  const before = codeStamp(dir);
+  fs.writeFileSync(path.join(dir, "notes.md"), "y");
+  assert.equal(codeStamp(dir), before, "non-script files don't count");
+  fs.utimesSync(path.join(dir, "a.mjs"), new Date(), new Date(Date.now() + 5000));
+  assert.notEqual(codeStamp(dir), before);
+});
