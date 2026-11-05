@@ -70,7 +70,7 @@ test("a new session starts inside the card's worktree, without the main checkout
   assert.equal(fs.realpathSync(call.cwd), fs.realpathSync(job.repoDir));
   const addDirs = call.args.flatMap((a, i) => (call.args[i - 1] === "--add-dir" ? [a] : []));
   assert.ok(!addDirs.includes(repo), "the worktree loads the repo's skills itself");
-  assert.equal(store.getItem(id).job.runLog.at(-1).model, "sonnet");
+  assert.equal(store.getItem(id).job.runLog.at(-1).model, "opus");
 });
 
 test("a session started before the change resumes in its old job folder", () => {

@@ -260,7 +260,7 @@ export const WORKER_DEFAULTS = {
   timeLimitMin: 60, // per work run; the session is stopped after this
   model: "opus", // work runs (after "go")
   cardTimeLimitMin: 20, // per card run (prep, a reply, a draft)
-  cardModel: "sonnet", // card runs
+  cardModel: "opus", // card runs
   cardEffort: "medium", // card runs (claude --effort); work runs use the default effort
   prepDelayMin: 10, // a new ask waits this long before its card session starts, so the user can claim it
   precheckWaitMin: 45, // past prepDelayMin, an ask the sweep never pre-checked starts its session anyway

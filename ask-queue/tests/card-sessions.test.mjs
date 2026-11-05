@@ -215,7 +215,7 @@ test("dispatch: every reply resumes the same session", async () => {
   assert.equal(first[first.indexOf("--name") + 1], `${id} ${item.title}`, "named after the card in the agent view");
   assert.equal(second[second.indexOf("--resume") + 1], sessionId);
   assert.ok(second.join("\n").includes("[601.1] yes"), "the new reply is in the resume prompt");
-  assert.equal(first[first.indexOf("--model") + 1], "sonnet", "card runs default to sonnet");
+  assert.equal(first[first.indexOf("--model") + 1], "opus", "card runs default to opus");
   assert.equal(first[first.indexOf("--effort") + 1], "medium");
   item = store.getItem(id);
   assert.equal(item.job.runs, 2);

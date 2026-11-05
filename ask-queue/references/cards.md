@@ -85,7 +85,7 @@ from [Priya Shah · PROJ-412](https://…)
 → _My guess: data-pipeline (the PROJ-412 component)._
 
 👉 Reply **ok** to take my guesses, or answer by number: `2: analytics`
-🧠 _Sonnet · say opus, sonnet or haiku to switch_
+🧠 _Opus · say opus, sonnet or haiku to switch_
 ━━━━━━━━━━━━━━━━
 ```
 
@@ -106,7 +106,7 @@ from [Sam Lee · #eng-platform](https://…)
 ℹ️ _Used Finance's live sheet, like your answer for AQ-4 on Sep 12._
 
 👉 Reply **yes** to save it as a draft, or tell me what to change.
-🧠 _Sonnet · say opus, sonnet or haiku to switch_
+🧠 _Opus · say opus, sonnet or haiku to switch_
 ━━━━━━━━━━━━━━━━
 ```
 
@@ -137,7 +137,7 @@ from [Lee Park · #data](https://…)
 → _My guess: no, Lee asked by region._
 
 👉 Answer by number, change anything, or say **go**.
-🧠 _Sonnet · say opus, sonnet or haiku to switch (the work itself runs on Opus unless you pick)_
+🧠 _Opus · say opus, sonnet or haiku to switch_
 ━━━━━━━━━━━━━━━━
 ```
 

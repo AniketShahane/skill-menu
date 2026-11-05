@@ -95,7 +95,7 @@ still needs a session: if you replied or reacted 👀, another card has it, or o
 sessions is on it, no session starts. Unchecked after `precheckWaitMin` 45 more minutes, it starts anyway.
 Start a self-DM message with "Claude," to ask directly: the answer comes in that message's thread.
 Limits live in `config.workers`: `max` 5 sessions at once, `dailyRuns` 100 runs a day;
-card runs `cardModel` sonnet, `cardEffort` medium, `cardTimeLimitMin` 20; work runs `model` opus,
+card runs `cardModel` opus, `cardEffort` medium, `cardTimeLimitMin` 20; work runs `model` opus,
 `timeLimitMin` 60. There's no per-run dollar cap: `claude --max-budget-usd` only works in `-p` mode.
 Change one with `$AQ config set workers.max 3`. Sweep and replies runs use `config.models` (both
 sonnet). A model name (`opus`, `sonnet`, `haiku`) in any card reply switches that card's sessions to

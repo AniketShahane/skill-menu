@@ -74,7 +74,7 @@ prompt: fold it into the prep.
 the card's channel, `message_ts` = the ts in brackets before it). Then handle them.
 
 **A model name** (`opus`, `sonnet`, `haiku`) in a reply already switched this card's model (aq route
-did it; this run uses it). Confirm in one line, `🤖 🧠 **AQ-n · Now on Sonnet**`, and do the rest
+did it; this run uses it). Confirm in one line, `🤖 🧠 **AQ-n · Now on Haiku**`, and do the rest
 of the reply. A reply that is only the model name needs nothing else.
 
 **Where to work.** Nothing checks your tool calls: skills, subagents, web, CLIs and installs all
@@ -168,6 +168,11 @@ their message). There is no card to post and no draft to approve: they asked you
    result, `asking` when blocked. A reply in the thread resumes you like any card reply (section 2).
 
 ## 6. Data answers
+
+**Scope first.** A data check covers every table and the full date range the user named (unnamed:
+all the history those tables hold). Find the exact job, table or file they named and read how it
+loads data before any query. Can't cover it all in this run: set `review` and list what's left,
+never `done`.
 
 A number someone will act on (a volume, a count, a rate) is checked before it goes in a draft:
 
