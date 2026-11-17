@@ -6,7 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { addCandidate, createStore, updateItem } from "../scripts/aq.mjs";
-import { execJob, sessionName, settingsFile, tick, trustJobsFolder, snapshotRepo } from "../scripts/dispatch.mjs";
+import { execJob, sessionName, settingsFile, tick, trustJobsFolder, trustSkillFolder, snapshotRepo } from "../scripts/dispatch.mjs";
 import { decide, makeContext } from "../scripts/guard.mjs";
 import { fakeBgClaude } from "./helpers.mjs";
 
@@ -267,4 +267,18 @@ test("trustJobsFolder: trusts jobs/ once, and not at all under a trusted parent"
   fs.writeFileSync(other, "{}");
   assert.equal(trustJobsFolder("/data/aq", [file, other]), true, "every config file gets it");
   assert.equal(JSON.parse(fs.readFileSync(other, "utf8")).projects["/data/aq/jobs"].hasTrustDialogAccepted, true);
+});
+
+test("trustSkillFolder: the --add-dir skill folder is trusted in every config file", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aq-trust-"));
+  const file = path.join(dir, ".claude.json");
+  const other = path.join(dir, "other.json");
+  fs.writeFileSync(file, JSON.stringify({ keep: 1, projects: { "/data/aq/jobs": { hasTrustDialogAccepted: true } } }));
+  fs.writeFileSync(other, "{}");
+  assert.equal(trustSkillFolder("/home/u/.claude/skills/ask-queue", [file, other]), true);
+  for (const each of [file, other]) {
+    assert.equal(JSON.parse(fs.readFileSync(each, "utf8")).projects["/home/u/.claude/skills/ask-queue"].hasTrustDialogAccepted, true);
+  }
+  assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).keep, 1);
+  assert.equal(trustSkillFolder("/home/u/.claude/skills/ask-queue", [file, other]), false, "already trusted: no rewrite");
 });

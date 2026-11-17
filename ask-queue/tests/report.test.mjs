@@ -79,7 +79,8 @@ test("weekly report: off, or a bad config, never blocks the tick", () => {
   const bad = setup({ report: { day: "Someday" } });
   addCandidate(bad.store, { title: "manual", source: { kind: "manual" }, fingerprints: ["manual:1"] });
   const spawned = [];
-  const result = tick({ home: bad.home, clock: at("2026-11-06T19:05:00Z"), spawnSupervisor: (_h, id) => spawned.push(id), alive: () => true });
+  // The real clock: the ask above is made now, and a fixed date in the past would make it look too new to start.
+  const result = tick({ home: bad.home, clock: () => new Date(Date.now() + 60_000), spawnSupervisor: (_h, id) => spawned.push(id), alive: () => true });
   assert.match(result.scheduleError, /config report/);
   assert.deepEqual(spawned, ["AQ-1"], "sessions still start");
 });

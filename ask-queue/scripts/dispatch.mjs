@@ -744,6 +744,14 @@ export function trustJobsFolder(home, files = claudeConfigFiles()) {
   return changed;
 }
 
+// A folder passed with --add-dir must be trusted too: Claude Code 2.1.326 refuses to start a
+// session otherwise ("Added folder not trusted"). The skill folder is the one every card adds.
+export function trustSkillFolder(dir = SKILL_DIR, files = claudeConfigFiles()) {
+  let changed = false;
+  for (const file of [files].flat()) changed = trustIn(file, dir) || changed;
+  return changed;
+}
+
 function trustIn(file, dir) {
   let config = {};
   try {
@@ -837,6 +845,7 @@ export async function execJob(id, { home = resolveHome(), claudeBin = process.en
   let code = 0;
   try {
     trustJobsFolder(home);
+    trustSkillFolder();
     const out = execFileSync(claudeBin, args, { ...opts, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120_000 });
     bgId = out.replace(/\x1b\[[0-9;]*m/g, "").match(/backgrounded · ([0-9a-f]+)/)?.[1] || null;
     if (!bgId) log(`no session id in: ${out.trim().slice(0, 300)}`);
