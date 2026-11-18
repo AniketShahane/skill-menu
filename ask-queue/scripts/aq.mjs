@@ -579,6 +579,11 @@ function applyUpdate(store, id, { patch = {}, status, note, internal = false } =
     // Merge, so setting job.followUp never wipes the session id.
     patch = { ...patch, job: { ...(item.job || {}), ...patch.job } };
   }
+  // Merge, so a session that only bumps card.lastSeenTs keeps channelId and ts (the thread link the
+  // watcher and gate route replies by). null still clears the card.
+  if (patch.card && typeof patch.card === "object" && !Array.isArray(patch.card)) {
+    patch = { ...patch, card: { ...(item.card || {}), ...patch.card } };
+  }
   if (patch.track !== undefined) {
     if (typeof patch.track !== "object" || patch.track === null || Array.isArray(patch.track)) throw new AqError("track must be an object");
     const bad = Object.keys(patch.track).filter((key) => !internal && !TRACK_MODEL_KEYS.has(key));

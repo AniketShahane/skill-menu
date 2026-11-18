@@ -309,6 +309,17 @@ test("work items: scoping → ready needs a brief, job fields merge, dispatcher 
   assert.throws(() => updateItem(store, "AQ-1", { status: "done" }, clock), /Cannot move/);
 });
 
+test("card fields merge: a lastSeenTs-only patch keeps the thread link; null clears the card", () => {
+  const store = freshStore();
+  addCandidate(store, candidate(), clock);
+  updateItem(store, "AQ-1", { patch: { card: { channelId: "D_BOT", ts: "100.0", lastSeenTs: "100.0" } } }, clock);
+  // What a card session sent after answering a reply (it wiped the thread link before the merge).
+  updateItem(store, "AQ-1", { patch: { card: { lastSeenTs: "100.5" } } }, clock);
+  assert.deepEqual(store.getItem("AQ-1").card, { channelId: "D_BOT", ts: "100.0", lastSeenTs: "100.5" });
+  updateItem(store, "AQ-1", { patch: { card: null } }, clock);
+  assert.equal(store.getItem("AQ-1").card, null);
+});
+
 test("jobs lists queue order; stop un-queues ready work and flags running work", () => {
   const store = freshStore();
   for (const fp of ["a", "b"]) addCandidate(store, candidate({ fingerprints: [fp] }), clock);
