@@ -108,7 +108,7 @@ Unattended runs (cron) have no one to answer: never ask in chat; decide, record 
 | Command | Use |
 |---|---|
 | `add --file tmp/c.json` | new ask; returns `created`, `merged` or `duplicate` (fingerprint de-dup) |
-| `list --open` / `list --watch` | open items / card threads to check (open, plus closed or filtered in the last 48h) |
+| `list --open` / `list --watch` | open items / card threads to check (open, plus done or skipped within records.keepDays, default 7 days, and filtered within 48h) |
 | `seen <channelId> <cardTs> <msgTs>` | mark the user's messages in a card thread handled up to `msgTs` (forward-only) |
 | `route AQ-n --file tmp/r.json` | pass messages (`{messages, seenTs}`) to that card's session and queue it |
 | `direct --file tmp/d.json` | a direct-ask message (`{ts, text, editedTs}`) becomes its own card |
@@ -136,8 +136,8 @@ the user; shown in a digest so it can be brought back). Work: `scoping → ready
 until its reminder card is posted and the user replies there.
 `ready` and `working` also mean "the card's session is queued / running": a reply moves any card to
 `ready` (`job.restingStatus` keeps where it was), and every run ends by setting the card's next
-status. `ready` needs `job.brief`. A reply on a `done` or `skipped` card within 48 hours resumes its
-session; later, it starts a fresh one. `$AQ` rejects illegal moves.
+status. `ready` needs `job.brief`. A reply on a `done` or `skipped` card within records.keepDays (default 7
+days) resumes its session; later, it starts a fresh one. `$AQ` rejects illegal moves.
 
 ## Draft kinds
 

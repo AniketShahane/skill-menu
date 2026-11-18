@@ -790,6 +790,9 @@ export function compareTs(a, b) {
 
 export function listItems(store, { statuses, open, watch } = {}, clock) {
   const now = (clock ? clock() : new Date()).getTime();
+  // Done and skipped cards stay watched as long as they keep their session (records.keepDays), so the
+  // gate backs up the watcher for a late reply. Filtered digest threads keep 48h: replies there cost a run.
+  const keepMs = watch ? recordsConfig(store.config()).keepDays * 24 * 60 * 60 * 1000 : 0;
   return store
     .allItems()
     .filter((item) => {
@@ -798,9 +801,9 @@ export function listItems(store, { statuses, open, watch } = {}, clock) {
       if (watch) {
         if (!item.card?.ts) return false;
         if (WATCH_STATUSES.includes(item.status)) return true;
-        if (["filtered", "done", "skipped"].includes(item.status)) {
-          return now - Date.parse(enteredStatusAt(item)) < AFTER_CLOSE_WATCH_MS;
-        }
+        const age = now - Date.parse(enteredStatusAt(item));
+        if (item.status === "filtered") return age < AFTER_CLOSE_WATCH_MS;
+        if (["done", "skipped"].includes(item.status)) return age < Math.max(keepMs, AFTER_CLOSE_WATCH_MS);
         return false;
       }
       return true;

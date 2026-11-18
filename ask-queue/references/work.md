@@ -75,7 +75,7 @@ arrives when the run ends.
 | review | looks good ("great", "done", "ship it") | `done`, ledger entry (learn.md, `draftKind` `work`). Remind them the branch is theirs to push. |
 | review | an answer to your question, a change, or "continue" | Carry on with the work (section 5), then report again (`review`). |
 | review | drop it | `skipped`, ledger entry. |
-| done, skipped (48h) | more to do | Same as review. After 48 hours a reopened card starts a fresh session. |
+| done, skipped (7 days) | more to do | Same as review. After records.keepDays (default 7) a reopened card starts a fresh session. |
 
 ## 5. Work rules (work runs of the card session)
 

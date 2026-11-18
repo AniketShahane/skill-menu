@@ -136,14 +136,15 @@ test("a follow-up reopens a done or skipped item", () => {
   assert.equal(updateItem(store, "AQ-1", { status: "asking" }, clock).status, "asking");
 });
 
-test("closed cards stay watched for 48 hours after closing", () => {
+test("closed cards stay watched while they keep their session (records.keepDays, default 7)", () => {
   const store = freshStore();
   addCandidate(store, candidate(), clock);
   updateItem(store, "AQ-1", { status: "approving", patch: { card: { channelId: "D_ME", ts: "1.1" } } }, clock);
   updateItem(store, "AQ-1", { status: "skipped" }, clock);
+  const at = (hours) => () => new Date(tick + hours * 60 * 60 * 1000);
   assert.deepEqual(listItems(store, { watch: true }, clock).map((i) => i.id), ["AQ-1"]);
-  const later = () => new Date(tick + 49 * 60 * 60 * 1000);
-  assert.deepEqual(listItems(store, { watch: true }, later), []);
+  assert.deepEqual(listItems(store, { watch: true }, at(6 * 24)).map((i) => i.id), ["AQ-1"]);
+  assert.deepEqual(listItems(store, { watch: true }, at(7 * 24 + 1)), []);
 });
 
 test("compareTs orders Slack timestamps exactly", () => {
